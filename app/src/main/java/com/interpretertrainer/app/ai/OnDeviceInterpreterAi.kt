@@ -17,7 +17,6 @@ import java.util.Locale
 
 /**
  * Real on-device neural chatbot backed by the production LiteRT-LM Android SDK.
- *
  * Numeric assessment stays with LocalInterpreterCoach; the neural model explains evidence,
  * answers open-ended interpreter-training questions and uses recent session context.
  */
@@ -52,18 +51,18 @@ class OnDeviceInterpreterAi(context: Context) {
             closeRuntime()
 
             val model = OnDeviceModelManager.modelFile(appContext)
-            val config = EngineConfig(
-                modelPath = model.absolutePath,
-                backend = Backend.CPU(),
-                maxNumTokens = 2048,
-                cacheDir = FilePaths.aiCacheDir(appContext)
+            val candidate = Engine(
+                EngineConfig(
+                    modelPath = model.absolutePath,
+                    backend = Backend.CPU(),
+                    // Use the context/KV-cache size embedded in the converted model. Forcing a
+                    // different size can make otherwise valid LiteRT-LM artifacts fail to load.
+                    cacheDir = FilePaths.aiCacheDir(appContext)
+                )
             )
-            val candidate = Engine(config)
 
             try {
-                withContext(Dispatchers.Default) {
-                    candidate.initialize()
-                }
+                withContext(Dispatchers.Default) { candidate.initialize() }
                 val chat = candidate.createConversation(
                     ConversationConfig(
                         systemInstruction = Contents.of(BASE_SYSTEM_PROMPT)
@@ -72,12 +71,10 @@ class OnDeviceInterpreterAi(context: Context) {
                 engine = candidate
                 conversation = chat
             } catch (t: Throwable) {
-                runCatching {
-                    if (candidate.isInitialized()) candidate.close()
-                }
+                runCatching { if (candidate.isInitialized()) candidate.close() }
                 throw IllegalStateException(
                     buildString {
-                        append("Neural runtime could not load on this phone")
+                        append("Neural runtime could not load ${OnDeviceModelManager.MODEL_LABEL}")
                         t.message?.takeIf { it.isNotBlank() }?.let { append(": ").append(it) }
                         append(". Device ABI: ").append(Build.SUPPORTED_ABIS.joinToString())
                     },
@@ -144,16 +141,11 @@ class OnDeviceInterpreterAi(context: Context) {
     private suspend fun generate(prompt: String, maxTokens: Int): String = inferenceMutex.withLock {
         val chat = conversation ?: error("Interpreter AI conversation is not ready.")
         withContext(Dispatchers.Default) {
-            // LiteRT-LM's synchronous API returns a Message. Its string representation is the
-            // primary textual assistant output for the simple text-only conversation used here.
-            chat.sendMessage(prompt)
-                .toString()
-                .trim()
-                .ifBlank { error("Interpreter AI returned an empty response.") }
-                .let { response ->
-                    // maxTokens remains part of our public API for future per-message tuning.
-                    if (maxTokens <= 0) response else response
-                }
+            // Message.text is the actual primary assistant text. Do not expose Message.toString(),
+            // which is only a debug representation of the response object.
+            val response = chat.sendMessage(prompt).text.trim()
+            require(response.isNotBlank()) { "Interpreter AI returned an empty response." }
+            if (maxTokens > 0) response else response
         }
     }
 

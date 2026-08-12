@@ -8,3 +8,6 @@
 .externalNativeBuild
 .cxx
 app/build
+backend/node_modules/
+backend/.env
+.env

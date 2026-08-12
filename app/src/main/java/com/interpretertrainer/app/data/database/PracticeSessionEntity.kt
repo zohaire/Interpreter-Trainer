@@ -15,5 +15,7 @@ data class PracticeSessionEntity(
     val transcript: String,
     val notes: String,
     val segmentDurationSeconds: Int?,
-    val status: String
+    val status: String,
+    val recordingPath: String? = null,
+    val aiFeedback: String? = null
 )

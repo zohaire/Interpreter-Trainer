@@ -13,12 +13,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Locale
 
 /**
- * Real on-device neural chatbot backed by the production LiteRT-LM Android SDK.
- * Numeric assessment stays with LocalInterpreterCoach; the neural model explains evidence,
- * answers open-ended interpreter-training questions and uses recent session context.
+ * Real on-device neural chatbot backed by LiteRT-LM.
+ *
+ * The runtime is deliberately defensive because Android accelerator support varies by device:
+ * - GPU is preferred for this model because it has a much smaller runtime memory footprint.
+ * - CPU is an automatic fallback when GPU cannot initialize or invoke the model.
+ * - A tiny hidden inference probe must succeed before the UI is allowed to say "AI ready".
+ * - Any failed native send invalidates the conversation/engine instead of reusing poisoned state.
+ * - Practice history is compacted and injected only once per runtime conversation so the 2048-token
+ *   Qwen context is not consumed by repeatedly attaching the same session transcripts.
  */
 class OnDeviceInterpreterAi(context: Context) {
     private val appContext = context.applicationContext
@@ -27,11 +34,20 @@ class OnDeviceInterpreterAi(context: Context) {
 
     @Volatile private var engine: Engine? = null
     @Volatile private var conversation: Conversation? = null
+    @Volatile private var activeBackend: RuntimeBackend? = null
+    @Volatile private var practiceContextPrimed = false
 
     fun isModelInstalled(): Boolean = OnDeviceModelManager.isInstalled(appContext)
 
     fun isReady(): Boolean = engine?.isInitialized() == true && conversation != null
 
+    fun activeBackendLabel(): String? = activeBackend?.label
+
+    /**
+     * Loads the model and performs a real one-token-ish generation probe on the phone.
+     * Engine.initialize() alone is not considered readiness because some devices fail only when the
+     * first compiled-model prefill/decode is invoked.
+     */
     suspend fun ensureLoaded(): Result<Unit> = runCatching {
         loadMutex.withLock {
             if (isReady()) return@withLock
@@ -48,42 +64,24 @@ class OnDeviceInterpreterAi(context: Context) {
                 )
             }
 
+            cleanupObsoleteRuntimeCache()
             closeRuntime()
 
-            val model = OnDeviceModelManager.modelFile(appContext)
-            val candidate = Engine(
-                EngineConfig(
-                    modelPath = model.absolutePath,
-                    backend = Backend.CPU(),
-                    // Use the context/KV-cache size embedded in the converted model. Forcing a
-                    // different size can make otherwise valid LiteRT-LM artifacts fail to load.
-                    cacheDir = FilePaths.aiCacheDir(appContext)
-                )
-            )
-
-            try {
-                withContext(Dispatchers.Default) { candidate.initialize() }
-                val chat = candidate.createConversation(
-                    ConversationConfig(
-                        systemInstruction = Contents.of(BASE_SYSTEM_PROMPT),
-                        // Qwen3 is a hybrid thinking model. For a mobile coaching chat we want the
-                        // concise assistant answer, not internal reasoning tokens.
-                        extraContext = mapOf("enable_thinking" to false)
-                    )
-                )
-                engine = candidate
-                conversation = chat
-            } catch (t: Throwable) {
-                runCatching { if (candidate.isInitialized()) candidate.close() }
-                throw IllegalStateException(
-                    buildString {
-                        append("Neural runtime could not load ${OnDeviceModelManager.MODEL_LABEL}")
-                        t.message?.takeIf { it.isNotBlank() }?.let { append(": ").append(it) }
-                        append(". Device ABI: ").append(Build.SUPPORTED_ABIS.joinToString())
-                    },
-                    t
-                )
+            val failures = mutableListOf<String>()
+            for (backend in listOf(RuntimeBackend.GPU, RuntimeBackend.CPU)) {
+                try {
+                    loadRuntime(backend, runHealthProbe = true)
+                    return@withLock
+                } catch (t: Throwable) {
+                    failures += "${backend.label}: ${shortError(t)}"
+                    closeRuntime()
+                }
             }
+
+            error(
+                "The neural model file is installed, but this phone could not run an inference " +
+                    "with either GPU or CPU. ${failures.joinToString(" | ")}"
+            )
         }
     }
 
@@ -95,17 +93,23 @@ class OnDeviceInterpreterAi(context: Context) {
         require(message.isNotBlank()) { "Message is empty." }
         ensureLoaded().getOrThrow()
 
-        val prompt = buildString {
-            appendLine("Use the following local practice context only when it is relevant. Never invent missing performance data.")
-            appendLine("<practice_context>")
-            append(recentSessionContext(sessions))
-            appendLine("</practice_context>")
-            appendLine()
-            appendLine("User message:")
-            append(message.trim())
+        val prompt = if (!practiceContextPrimed) {
+            buildString {
+                appendLine("Relevant saved-practice summary. Use it only when useful; never invent missing evidence.")
+                appendLine("<practice_context>")
+                append(compactRecentSessionContext(sessions))
+                appendLine("</practice_context>")
+                appendLine()
+                appendLine("User message:")
+                append(message.trim())
+            }
+        } else {
+            message.trim()
         }
 
-        generate(prompt, maxTokens)
+        val answer = generateWithRecovery(prompt, maxTokens)
+        practiceContextPrimed = true
+        answer
     }
 
     suspend fun explainEvaluation(
@@ -117,39 +121,121 @@ class OnDeviceInterpreterAi(context: Context) {
         evaluatorReport: String
     ): Result<String> = runCatching {
         ensureLoaded().getOrThrow()
+
+        // Keep the entire request comfortably below this model's 2048-token context. Character
+        // caps are intentionally conservative because Arabic and mixed-language text can tokenize
+        // more densely than English.
         val prompt = buildString {
-            appendLine("Explain this interpreter performance evaluation. The LOCAL EVALUATOR REPORT is authoritative.")
-            appendLine("Do not change its numbers, do not invent semantic accuracy, and do not claim evidence that is absent.")
-            appendLine("Give concise feedback and 2 to 4 practical exercises.")
-            appendLine("Practice mode: $mode")
+            appendLine("Explain this interpreter evaluation concisely. The LOCAL EVALUATOR REPORT is authoritative.")
+            appendLine("Do not change its numbers or invent semantic accuracy. Give 2 to 4 practical exercises.")
+            appendLine("Mode: $mode")
             appendLine("Languages: $sourceLanguage -> $targetLanguage")
             appendLine()
             appendLine("LOCAL EVALUATOR REPORT:")
-            appendLine(evaluatorReport.take(6_000))
+            appendLine(evaluatorReport.take(1_600))
             if (sourceText.isNotBlank()) {
                 appendLine()
-                appendLine("SOURCE TRANSCRIPT:")
-                appendLine(sourceText.take(3_000))
+                appendLine("SOURCE EXCERPT:")
+                appendLine(sourceText.take(700))
             }
             if (traineeText.isNotBlank()) {
                 appendLine()
-                appendLine("TRAINEE TRANSCRIPT:")
-                appendLine(traineeText.take(3_000))
+                appendLine("TRAINEE EXCERPT:")
+                appendLine(traineeText.take(700))
             }
         }
 
-        generate(prompt, 520)
+        generateWithRecovery(prompt, 420)
     }
 
-    private suspend fun generate(prompt: String, maxTokens: Int): String = inferenceMutex.withLock {
+    /**
+     * Sends once on the current backend. If native invocation fails, the failed runtime is destroyed,
+     * the alternate backend is health-probed, and the same request is retried once. If that also
+     * fails, no broken Conversation is kept around for the next Send button press.
+     */
+    private suspend fun generateWithRecovery(prompt: String, maxTokens: Int): String =
+        inferenceMutex.withLock {
+            val firstBackend = activeBackend ?: error("Interpreter AI runtime is not ready.")
+
+            try {
+                return@withLock sendCurrent(prompt, maxTokens)
+            } catch (firstFailure: Throwable) {
+                val alternate = firstBackend.alternate()
+
+                val retry = runCatching {
+                    loadMutex.withLock {
+                        closeRuntime()
+                        loadRuntime(alternate, runHealthProbe = true)
+                    }
+                    sendCurrent(prompt, maxTokens)
+                }
+
+                retry.getOrNull()?.let { return@withLock it }
+
+                val alternateFailure = retry.exceptionOrNull()
+                closeRuntime()
+                throw IllegalStateException(
+                    "Neural inference failed on ${firstBackend.label} and ${alternate.label}. " +
+                        "${shortError(firstFailure)} | ${shortError(alternateFailure)}",
+                    firstFailure
+                )
+            }
+        }
+
+    private suspend fun sendCurrent(prompt: String, maxTokens: Int): String {
         val chat = conversation ?: error("Interpreter AI conversation is not ready.")
-        withContext(Dispatchers.Default) {
-            // LiteRT-LM 0.14.0 Message.toString() is defined as its textual Contents.toString().
+        return withContext(Dispatchers.Default) {
+            // LiteRT-LM 0.14.0 Message.toString() returns its textual Contents.
             val response = chat.sendMessage(prompt).toString().trim()
             require(response.isNotBlank()) { "Interpreter AI returned an empty response." }
+            // LiteRT-LM's Conversation API does not expose a per-call max-output-token parameter;
+            // maxTokens is retained as part of our public API for a future streaming implementation.
             if (maxTokens > 0) response else response
         }
     }
+
+    private suspend fun loadRuntime(backend: RuntimeBackend, runHealthProbe: Boolean) {
+        val model = OnDeviceModelManager.modelFile(appContext)
+        val candidate = Engine(
+            EngineConfig(
+                modelPath = model.absolutePath,
+                backend = backend.engineBackend,
+                // Keep separate, versioned accelerator caches. Reusing a cache generated for a
+                // different model/backend can produce device-specific compiled-model failures.
+                cacheDir = FilePaths.aiCacheDir(appContext, backend)
+            )
+        )
+
+        try {
+            withContext(Dispatchers.Default) { candidate.initialize() }
+            val chat = candidate.createConversation(conversationConfig())
+
+            if (runHealthProbe) {
+                withContext(Dispatchers.Default) {
+                    val probe = chat.sendMessage("Runtime health check. Reply only: OK").toString().trim()
+                    require(probe.isNotBlank()) { "Runtime health check returned no text." }
+                }
+            }
+
+            engine = candidate
+            conversation = chat
+            activeBackend = backend
+            practiceContextPrimed = false
+        } catch (t: Throwable) {
+            runCatching { if (candidate.isInitialized()) candidate.close() }
+            throw IllegalStateException(
+                "${backend.label} runtime could not complete a real neural inference: ${shortError(t)}",
+                t
+            )
+        }
+    }
+
+    private fun conversationConfig() = ConversationConfig(
+        systemInstruction = Contents.of(BASE_SYSTEM_PROMPT),
+        // This is the key used by Qwen3's bundled Jinja template to emit an empty thinking block
+        // and move straight to the user-visible answer.
+        extraContext = mapOf("enable_thinking" to false)
+    )
 
     fun unload() {
         closeRuntime()
@@ -162,26 +248,38 @@ class OnDeviceInterpreterAi(context: Context) {
             runCatching { if (current.isInitialized()) current.close() }
         }
         engine = null
+        activeBackend = null
+        practiceContextPrimed = false
     }
 
-    private fun recentSessionContext(sessions: List<PracticeSessionEntity>): String = buildString {
+    private fun compactRecentSessionContext(sessions: List<PracticeSessionEntity>): String = buildString {
         if (sessions.isEmpty()) {
             appendLine("No saved practice sessions.")
             return@buildString
         }
 
-        sessions.sortedByDescending { it.startedAt }.take(5).forEachIndexed { index, session ->
+        val recent = sessions.sortedByDescending { it.startedAt }.take(2)
+        recent.forEachIndexed { index, session ->
             appendLine(
                 "${index + 1}. ${readableMode(session.practiceMode)}; " +
                     "${session.sourceLanguage} -> ${session.targetLanguage}; " +
-                    "duration ${session.durationMillis / 1000}s"
+                    "${session.durationMillis / 1000}s"
             )
-            session.notes.takeIf { it.isNotBlank() }?.let { appendLine("Notes: ${it.take(300)}") }
-            session.transcript.takeIf { it.isNotBlank() }?.let {
-                appendLine("Trainee transcript excerpt: ${it.take(450)}")
-            }
-            session.aiFeedback?.takeIf { it.isNotBlank() }?.let {
-                appendLine("Saved evaluator feedback: ${it.take(650)}")
+
+            if (index == 0) {
+                session.notes.takeIf { it.isNotBlank() }?.let {
+                    appendLine("Notes: ${it.take(120)}")
+                }
+                session.transcript.takeIf { it.isNotBlank() }?.let {
+                    appendLine("Trainee excerpt: ${it.take(240)}")
+                }
+                session.aiFeedback?.takeIf { it.isNotBlank() }?.let {
+                    appendLine("Saved evaluator summary: ${it.take(240)}")
+                }
+            } else {
+                session.aiFeedback?.takeIf { it.isNotBlank() }?.let {
+                    appendLine("Earlier evaluator summary: ${it.take(140)}")
+                }
             }
         }
     }
@@ -194,22 +292,46 @@ class OnDeviceInterpreterAi(context: Context) {
         else -> mode.replace('_', ' ')
     }
 
+    private fun cleanupObsoleteRuntimeCache() {
+        // This was shared by previous model/backend combinations. Leave the downloaded model alone;
+        // deleting cache data costs no network traffic and prevents stale compiled artifacts.
+        runCatching { File(appContext.cacheDir, "interpreter_ai_litert_cache").deleteRecursively() }
+    }
+
+    private fun shortError(t: Throwable?): String {
+        if (t == null) return "unknown runtime error"
+        val message = t.message?.replace('\n', ' ')?.trim().orEmpty()
+        return if (message.isBlank()) t::class.java.simpleName else message.take(360)
+    }
+
+    private enum class RuntimeBackend(
+        val label: String,
+        val engineBackend: Backend
+    ) {
+        GPU("GPU", Backend.GPU()),
+        CPU("CPU", Backend.CPU());
+
+        fun alternate(): RuntimeBackend = if (this == GPU) CPU else GPU
+    }
+
     private object FilePaths {
-        fun aiCacheDir(context: Context): String =
-            java.io.File(context.cacheDir, "interpreter_ai_litert_cache").apply { mkdirs() }.absolutePath
+        fun aiCacheDir(context: Context, backend: RuntimeBackend): String =
+            File(
+                context.cacheDir,
+                "interpreter_ai_qwen3_mixed_int4_v2_${backend.name.lowercase(Locale.ROOT)}"
+            ).apply { mkdirs() }.absolutePath
     }
 
     companion object {
         private val BASE_SYSTEM_PROMPT = """
-            You are Interpreter AI, a specialized conversational coach inside the Interpreter Trainer Android app.
-            Your job is to help interpreters and interpretation students improve shadowing, consecutive interpreting,
-            sight translation, note-taking, terminology, memory, reformulation, numbers, names, fluency and delivery.
-
-            Converse naturally and answer open-ended questions. Use English, French or Arabic according to the user's language.
-            Be practical and specific. You are not a general-purpose assistant: politely redirect unrelated requests back to interpreter training.
-            Never invent the user's past performance, transcript, score or trend. When practice-session evidence is supplied, distinguish evidence from inference.
-            Numeric performance scores come from the app's Local Interpreter Coach evaluator; never overwrite or fabricate them.
-            For cross-language interpretation, do not claim semantic equivalence unless the supplied evidence actually supports it.
+            You are Interpreter AI, a specialized coach for interpreters and interpretation students.
+            Help with shadowing, consecutive interpreting, sight translation, note-taking, terminology,
+            memory, reformulation, numbers, names, fluency and delivery. Reply naturally in the user's
+            language (English, French or Arabic). Be concise, practical and specific. Never invent the
+            user's performance, transcript, score or trend. Treat supplied evaluator numbers as
+            authoritative and clearly distinguish evidence from inference. Keep answers focused on
+            interpreter training. A hidden runtime health-check may appear at startup; answer it exactly
+            as requested and never mention it later.
         """.trimIndent()
     }
 }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -45,6 +46,7 @@ fun ShadowingScreen(
     val recorder = remember { ShadowingRecorder(context.applicationContext) }
 
     var sourceName by rememberSaveable { mutableStateOf<String?>(null) }
+    var mediaUrl by rememberSaveable { mutableStateOf("") }
     var notes by rememberSaveable { mutableStateOf("") }
     var speed by rememberSaveable { mutableFloatStateOf(1f) }
     var sourceLang by rememberSaveable { mutableStateOf(LanguageOption.ENGLISH_US) }
@@ -58,21 +60,38 @@ fun ShadowingScreen(
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var isRecording by remember { mutableStateOf(false) }
 
+    fun resetPracticeForNewSource() {
+        recordingElapsed = 0L
+        recordingPath = null
+        localFeedback = ""
+        localScore = null
+        errorMessage = null
+    }
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
-            sourceName = it.lastPathSegment
+            sourceName = it.lastPathSegment ?: "Local media"
             sourceMedia.load(it)
-            recordingElapsed = 0L
-            recordingPath = null
-            localFeedback = ""
-            localScore = null
-            errorMessage = null
+            mediaUrl = ""
+            resetPracticeForNewSource()
         }
+    }
+
+    fun loadNetworkSource() {
+        sourceMedia.loadUrl(mediaUrl)
+            .onSuccess {
+                val parsed = Uri.parse(mediaUrl.trim())
+                sourceName = parsed.lastPathSegment?.takeIf { it.isNotBlank() } ?: "Online media"
+                resetPracticeForNewSource()
+            }
+            .onFailure {
+                errorMessage = it.message ?: "Could not load that media URL."
+            }
     }
 
     fun beginShadowing() {
         if (sourceName == null) {
-            errorMessage = "Choose an audio or video source first."
+            errorMessage = "Choose a local source or load a media URL first."
             return
         }
         if (isRecording) return
@@ -166,8 +185,32 @@ fun ShadowingScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Button(onClick = { picker.launch(arrayOf("audio/*", "video/*")) }, enabled = !isRecording) {
-                Text("Choose audio / video")
+            SectionCard {
+                Text("Source media", style = MaterialTheme.typography.titleMedium)
+                Button(onClick = { picker.launch(arrayOf("audio/*", "video/*")) }, enabled = !isRecording) {
+                    Text("Choose from phone")
+                }
+                Text("or", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(
+                    value = mediaUrl,
+                    onValueChange = { mediaUrl = it; errorMessage = null },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Direct audio / video URL") },
+                    placeholder = { Text("https://example.com/video.mp4") },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
+                    enabled = !isRecording
+                )
+                Button(
+                    onClick = { loadNetworkSource() },
+                    enabled = mediaUrl.isNotBlank() && !isRecording
+                ) { Text("Load URL") }
+                Text(
+                    "Use a direct playable media or stream link. Ordinary webpage links may not contain a playable stream.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                sourceName?.let { Text("Loaded: $it", style = MaterialTheme.typography.labelLarge) }
             }
 
             AndroidView(
@@ -181,7 +224,7 @@ fun ShadowingScreen(
                 localScore = null
             }
 
-            Text("Playback speed")
+            Text("Playback speed", style = MaterialTheme.typography.titleSmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(.75f, 1f, 1.25f).forEach { value ->
                     FilterChip(
@@ -200,14 +243,11 @@ fun ShadowingScreen(
 
             SectionCard {
                 Text("Your shadowing recording", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(6.dp))
                 Text(
                     "Use headphones when possible so the microphone captures your voice rather than the source audio.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(Modifier.height(10.dp))
                 Text("Recording time: ${formatDuration(recordingElapsed)}")
-                Spacer(Modifier.height(10.dp))
 
                 if (!isRecording) {
                     Button(onClick = { requestStart() }, enabled = sourceName != null) {
@@ -226,7 +266,6 @@ fun ShadowingScreen(
                 recordingPath?.let { path ->
                     val file = File(path)
                     if (file.exists() && !isRecording) {
-                        Spacer(Modifier.height(10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = {
                                 recordingMedia.load(Uri.fromFile(file))
@@ -255,13 +294,12 @@ fun ShadowingScreen(
                     Column(Modifier.weight(1f)) {
                         Text("Local Shadowing Coach", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Independent and offline. No external AI account or API key is used.",
+                            "Fast offline scoring remains available even when the enhanced AI server is unavailable.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = sourceTranscript,
                     onValueChange = {
@@ -274,7 +312,6 @@ fun ShadowingScreen(
                     placeholder = { Text("Paste what the original speaker says") }
                 )
 
-                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = traineeTranscript,
                     onValueChange = {
@@ -287,7 +324,6 @@ fun ShadowingScreen(
                     placeholder = { Text("Paste the transcript of your shadowing") }
                 )
 
-                Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         enabled = !isRecording && (
@@ -299,30 +335,23 @@ fun ShadowingScreen(
                     ) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Generate Local Feedback")
+                        Text("Local Feedback")
                     }
                     OutlinedButton(onClick = onOpenAiCoach) { Text("Full Coach") }
                 }
 
-                errorMessage?.let {
-                    Spacer(Modifier.height(8.dp))
-                    Text(it, color = MaterialTheme.colorScheme.error)
-                }
+                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
                 localScore?.let {
-                    Spacer(Modifier.height(10.dp))
                     Text("Local score: $it / 100", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(6.dp))
                     LinearProgressIndicator(progress = { it / 100f }, modifier = Modifier.fillMaxWidth())
                 }
-                if (localFeedback.isNotBlank()) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(localFeedback)
-                }
+                if (localFeedback.isNotBlank()) Text(localFeedback)
             }
 
             Button(
                 enabled = sourceName != null && !isRecording,
+                modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     val position = sourceMedia.player.currentPosition.coerceAtLeast(0L)
                     sessionViewModel.save(
@@ -343,6 +372,8 @@ fun ShadowingScreen(
                     )
                 }
             ) { Text("Save session") }
+
+            Spacer(Modifier.height(12.dp))
         }
     }
 }

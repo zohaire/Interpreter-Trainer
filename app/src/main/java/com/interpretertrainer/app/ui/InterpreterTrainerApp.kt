@@ -7,6 +7,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.interpretertrainer.app.ui.screens.*
+import com.interpretertrainer.app.ui.theme.ThemeMode
 import com.interpretertrainer.app.viewmodel.SessionViewModel
 
 object Routes {
@@ -21,10 +22,20 @@ object Routes {
 }
 
 @Composable
-fun InterpreterTrainerApp(sessionViewModel: SessionViewModel) {
+fun InterpreterTrainerApp(
+    sessionViewModel: SessionViewModel,
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit
+) {
     val navController = rememberNavController()
     NavHost(navController = navController, startDestination = Routes.HOME) {
-        composable(Routes.HOME) { HomeScreen(onNavigate = navController::navigate) }
+        composable(Routes.HOME) {
+            HomeScreen(
+                onNavigate = navController::navigate,
+                themeMode = themeMode,
+                onThemeModeChange = onThemeModeChange
+            )
+        }
         composable(Routes.SIGHT) { SightTranslationScreen(onBack = navController::popBackStack, sessionViewModel) }
         composable(Routes.SHADOWING) {
             ShadowingScreen(

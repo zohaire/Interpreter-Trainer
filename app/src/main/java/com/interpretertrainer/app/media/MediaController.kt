@@ -14,6 +14,16 @@ class MediaController(context: Context) {
         player.prepare()
     }
 
+    fun loadUrl(rawUrl: String): Result<Unit> = runCatching {
+        val url = rawUrl.trim()
+        require(url.isNotBlank()) { "Paste a media URL first." }
+        val uri = Uri.parse(url)
+        require(uri.scheme.equals("https", ignoreCase = true) || uri.scheme.equals("http", ignoreCase = true)) {
+            "Use a direct http:// or https:// media URL."
+        }
+        load(uri)
+    }
+
     fun play() = player.play()
     fun pause() = player.pause()
     fun seekTo(positionMs: Long) = player.seekTo(positionMs.coerceAtLeast(0L))

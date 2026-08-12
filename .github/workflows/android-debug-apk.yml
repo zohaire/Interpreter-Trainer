@@ -38,7 +38,7 @@ jobs:
   neural-model-smoke-test:
     name: Load and run Interpreter AI model
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -48,13 +48,26 @@ jobs:
       - name: Install the same LiteRT-LM release used by Android
         run: python -m pip install --upgrade "litert-lm==0.14.0"
 
-      - name: Download, initialize and run the exact Qwen model
+      - name: Download the exact Qwen model with retry/backoff
+        shell: bash
+        env:
+          MODEL_URL: https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/qwen3_0_6b_mixed_int4.litertlm?download=true
+          MODEL_PATH: /tmp/qwen3_0_6b_mixed_int4.litertlm
+        run: |
+          set -euo pipefail
+          curl --location --fail --show-error \
+            --retry 12 --retry-all-errors --retry-delay 15 \
+            --connect-timeout 30 --max-time 1200 \
+            --user-agent "InterpreterTrainer-CI/1.0" \
+            --output "$MODEL_PATH" "$MODEL_URL"
+          test "$(stat -c%s "$MODEL_PATH")" -gt 450000000
+
+      - name: Initialize model and generate a real response
         shell: bash
         run: |
           set -euo pipefail
-          timeout 20m litert-lm run \
-            --from-huggingface-repo=litert-community/Qwen3-0.6B \
-            qwen3_0_6b_mixed_int4.litertlm \
+          timeout 15m litert-lm run \
+            /tmp/qwen3_0_6b_mixed_int4.litertlm \
             --backend=cpu \
             --prompt="You are an interpreter coach. Reply in one short sentence confirming that neural inference works." \
             | tee /tmp/interpreter-ai-smoke.log

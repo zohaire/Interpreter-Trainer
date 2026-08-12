@@ -7,6 +7,8 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 }
 
+val ciDebugKeystorePath = providers.environmentVariable("INTERPRETER_DEBUG_KEYSTORE").orNull
+
 android {
     namespace = "com.interpretertrainer.app"
     compileSdk = 36
@@ -24,7 +26,24 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
+    signingConfigs {
+        getByName("debug") {
+            // Hosted CI machines normally generate a fresh debug certificate. Explicitly point the
+            // debug build at our development-only key so APKs from different workflow runs are
+            // update-compatible and preserve app-private data such as the downloaded AI model.
+            if (!ciDebugKeystorePath.isNullOrBlank()) {
+                storeFile = file(ciDebugKeystorePath)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

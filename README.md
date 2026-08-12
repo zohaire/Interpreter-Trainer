@@ -2,48 +2,66 @@
 
 Interpreter Trainer is an Android 12+ application for Arabic, English and French interpreter practice.
 
-## Current baseline
+## Current capabilities
 
-- Home dashboard
-- Sight Translation: pasted/TXT text, text-size control, timer and session saving
-- Shadowing: Media3/ExoPlayer audio/video playback, standard player controls, 0.75x / 1.0x / 1.25x speeds, notes
-- Consecutive Interpretation: 15 / 30 / 60 second media segments with replay, previous, next, notes and transcript fields
-- Live Transcription: Android SpeechRecognizer, partial/final results, controlled automatic restart, microphone permission handling, ar-MA / en-US / fr-FR selector
-- Practice History: Room persistence and session review
-- Storage Access Framework for user-selected content
+- Branded Compose home dashboard with System / Light / Dark appearance modes
+- Sight Translation practice with text-size controls, timing, notes and session saving
+- Shadowing with Media3 playback, 0.75x / 1.0x / 1.25x speed, simultaneous trainee microphone recording, replay, notes and local feedback
+- Consecutive Interpretation with 15 / 30 / 60 second playback-position segments, replay / previous / next controls, notes and transcript fields
+- Local media import plus direct network audio/video URLs; progressive media, HLS and DASH playback modules are included
+- Live external-audio indicator for Bluetooth, wired headset / headphones and other external outputs
+- Live Transcription with Android SpeechRecognizer and ar-MA / en-US / fr-FR selection
+- Practice History with Room persistence, recordings, notes, transcripts and saved feedback
+- Interpreter Coach with two layers:
+  - deterministic on-device evaluator and offline specialized fallback chatbot
+  - optional self-hosted open-source Qwen2.5-1.5B-Instruct chatbot served by llama.cpp
 - GitHub Actions debug APK build
 
-## Important scope notes
+## Enhanced open-source AI
 
-This repository is the production foundation, not a claim that every requested module is finished. TXT extraction is implemented. PDF text extraction and DOCX text extraction are intentionally left for the dedicated document-processing layer; scanned PDFs require a future OCR module. Voice recording files, per-segment note entities, Android 14+ recognition language switching, and richer media persistence are also subsequent milestones.
+The app does not require a commercial AI API key. The enhanced chatbot is designed to connect to infrastructure controlled by the app owner using:
+
+- `Qwen/Qwen2.5-1.5B-Instruct-GGUF` — Apache-2.0 model
+- `ggml-org/llama.cpp` — MIT-licensed inference runtime
+
+See [`ai-server/README.md`](ai-server/README.md) for the Docker setup. The local Android evaluator remains authoritative for numeric performance scores. The generative model explains evidence, answers interpreter-training questions and provides practice suggestions without silently replacing measured scores.
+
+## Media URL scope
+
+The URL field is for a **direct playable media or stream URL**, such as a direct MP4/MP3/M4A/WebM file, HLS playlist or DASH manifest. A normal webpage URL is not automatically a media stream and may not be playable unless the site exposes a direct compatible media endpoint.
+
+## Privacy and release security
+
+The offline coach does not need a server. When enhanced AI is enabled, recent practice context can be sent to the self-hosted server so it can answer performance questions. Production deployments should use HTTPS and an authenticated reverse proxy. Cleartext HTTP is permitted only by the debug manifest to make same-Wi-Fi development testing practical.
 
 ## Build on GitHub
 
-1. Create a new GitHub repository.
-2. Upload the contents of this folder to the repository root.
-3. Commit/push to `main`.
-4. Open **Actions** → **Build Android Debug APK**.
-5. Run the workflow manually, or let it run after a push.
-6. Open the completed workflow run and download `interpreter-trainer-debug-apk` from **Artifacts**.
-
-The workflow uses Java 17 and Gradle 8.13, then runs:
+GitHub Actions uses Java 17 and Gradle 8.13, then runs:
 
 ```bash
 gradle --no-daemon :app:assembleDebug
 ```
 
+Open **Actions → Build Android Debug APK**, then download `interpreter-trainer-debug-apk` from a successful run's Artifacts section.
+
 ## Local development
 
-Open the repository in Android Studio. The project targets API 36 and has a minimum SDK of 31 (Android 12).
+Open the repository in Android Studio. The project targets API 36 with minimum SDK 31 (Android 12).
 
 Package/application ID: `com.interpretertrainer.app`
 
-## Next recommended milestones
+## Ownership
 
-1. Verify the first GitHub APK build and correct any dependency/toolchain issue surfaced by CI.
-2. Add robust PDF extractable-text and DOCX import.
-3. Add voice recording and saved recording URIs.
-4. Move consecutive notes/transcripts to per-segment Room entities.
-5. Integrate SpeechRecognizer directly into Shadowing and Consecutive screens.
-6. Add source transcript support and Android 14+ language detection/switching when the recognition engine supports it.
-7. Add tests for segment boundary behavior and database persistence.
+Application owner: **Zouhair Elachaqi**  
+Email: **zohaireachak@gmail.com**  
+Phone: **0655156667**
+
+Third-party model/runtime notices are documented in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+## Next quality milestones
+
+- Robust extractable-text PDF and DOCX import
+- Automatic local/cloud transcription of recorded interpreter audio before evaluation
+- Per-segment Room entities for consecutive notes, transcript and score history
+- Better semantic evaluation for cross-language Arabic / English / French interpretation
+- Automated tests for media URL errors, segment boundaries, database migrations and coach scoring

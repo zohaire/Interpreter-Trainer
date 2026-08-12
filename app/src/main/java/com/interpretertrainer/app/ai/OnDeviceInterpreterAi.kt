@@ -141,9 +141,8 @@ class OnDeviceInterpreterAi(context: Context) {
     private suspend fun generate(prompt: String, maxTokens: Int): String = inferenceMutex.withLock {
         val chat = conversation ?: error("Interpreter AI conversation is not ready.")
         withContext(Dispatchers.Default) {
-            // Message.text is the actual primary assistant text. Do not expose Message.toString(),
-            // which is only a debug representation of the response object.
-            val response = chat.sendMessage(prompt).text.trim()
+            // LiteRT-LM 0.14.0 Message.toString() is defined as its textual Contents.toString().
+            val response = chat.sendMessage(prompt).toString().trim()
             require(response.isNotBlank()) { "Interpreter AI returned an empty response." }
             if (maxTokens > 0) response else response
         }

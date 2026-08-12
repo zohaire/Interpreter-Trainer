@@ -26,10 +26,11 @@ fun HomeScreen(onNavigate: (String) -> Unit) {
                 Spacer(Modifier.height(14.dp))
             }
             item { TrainingCard("Sight Translation", "Read, time and record sight-translation practice.", Icons.Default.Article) { onNavigate(Routes.SIGHT) } }
-            item { TrainingCard("Shadowing", "Play audio/video at training speeds while taking notes.", Icons.Default.GraphicEq) { onNavigate(Routes.SHADOWING) } }
+            item { TrainingCard("Shadowing", "Play audio/video while recording your own shadowing performance.", Icons.Default.GraphicEq) { onNavigate(Routes.SHADOWING) } }
             item { TrainingCard("Consecutive Interpretation", "Practice reliable 15, 30 or 60 second segments.", Icons.Default.SkipNext) { onNavigate(Routes.CONSECUTIVE) } }
             item { TrainingCard("Live Transcription", "Practice speech recognition in Arabic, English or French.", Icons.Default.Mic) { onNavigate(Routes.TRANSCRIPTION) } }
-            item { TrainingCard("Practice History", "Review saved sessions, notes and transcripts.", Icons.Default.History) { onNavigate(Routes.HISTORY) } }
+            item { TrainingCard("AI Interpreter Coach", "Ask an interpreter-focused AI assistant and configure AI feedback.", Icons.Default.AutoAwesome) { onNavigate(Routes.AI_COACH) } }
+            item { TrainingCard("Practice History", "Review saved sessions, notes, transcripts, recordings and feedback.", Icons.Default.History) { onNavigate(Routes.HISTORY) } }
         }
     }
 }

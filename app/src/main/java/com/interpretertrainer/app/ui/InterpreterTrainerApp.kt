@@ -15,6 +15,7 @@ object Routes {
     const val SHADOWING = "shadowing"
     const val CONSECUTIVE = "consecutive"
     const val TRANSCRIPTION = "transcription"
+    const val AI_COACH = "ai-coach"
     const val HISTORY = "history"
     const val HISTORY_DETAIL = "history/{id}"
 }
@@ -25,9 +26,16 @@ fun InterpreterTrainerApp(sessionViewModel: SessionViewModel) {
     NavHost(navController = navController, startDestination = Routes.HOME) {
         composable(Routes.HOME) { HomeScreen(onNavigate = navController::navigate) }
         composable(Routes.SIGHT) { SightTranslationScreen(onBack = navController::popBackStack, sessionViewModel) }
-        composable(Routes.SHADOWING) { ShadowingScreen(onBack = navController::popBackStack, sessionViewModel) }
+        composable(Routes.SHADOWING) {
+            ShadowingScreen(
+                onBack = navController::popBackStack,
+                sessionViewModel = sessionViewModel,
+                onOpenAiCoach = { navController.navigate(Routes.AI_COACH) }
+            )
+        }
         composable(Routes.CONSECUTIVE) { ConsecutiveScreen(onBack = navController::popBackStack, sessionViewModel) }
         composable(Routes.TRANSCRIPTION) { LiveTranscriptionScreen(onBack = navController::popBackStack, sessionViewModel) }
+        composable(Routes.AI_COACH) { AiCoachScreen(onBack = navController::popBackStack) }
         composable(Routes.HISTORY) { HistoryScreen(onBack = navController::popBackStack, sessionViewModel) { id -> navController.navigate("history/$id") } }
         composable(
             Routes.HISTORY_DETAIL,

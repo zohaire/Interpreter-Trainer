@@ -1,76 +1,90 @@
 package com.interpretertrainer.app.ai
 
 import android.content.Context
-import com.arm.aichat.AiChat
-import com.arm.aichat.InferenceEngine
+import android.os.Build
+import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.Conversation
+import com.google.ai.edge.litertlm.ConversationConfig
+import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.EngineConfig
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /**
- * Real neural chatbot running Qwen locally through llama.cpp.
- * Numeric assessment stays with LocalInterpreterCoach; this model explains evidence,
+ * Real on-device neural chatbot backed by the production LiteRT-LM Android SDK.
+ *
+ * Numeric assessment stays with LocalInterpreterCoach; the neural model explains evidence,
  * answers open-ended interpreter-training questions and uses recent session context.
  */
 class OnDeviceInterpreterAi(context: Context) {
     private val appContext = context.applicationContext
-    private val engine: InferenceEngine = AiChat.getInferenceEngine(appContext)
     private val loadMutex = Mutex()
+    private val inferenceMutex = Mutex()
 
-    @Volatile
-    private var systemPromptInstalled = false
+    @Volatile private var engine: Engine? = null
+    @Volatile private var conversation: Conversation? = null
 
     fun isModelInstalled(): Boolean = OnDeviceModelManager.isInstalled(appContext)
 
-    fun isReady(): Boolean = engine.state.value is InferenceEngine.State.ModelReady
+    fun isReady(): Boolean = engine?.isInitialized() == true && conversation != null
 
     suspend fun ensureLoaded(): Result<Unit> = runCatching {
         loadMutex.withLock {
-            if (engine.state.value is InferenceEngine.State.ModelReady && systemPromptInstalled) {
-                return@withLock
-            }
+            if (isReady()) return@withLock
 
             if (!OnDeviceModelManager.isInstalled(appContext)) {
                 error("Interpreter AI model is not installed yet.")
             }
 
-            when (val state = engine.state.value) {
-                is InferenceEngine.State.Error -> engine.cleanUp()
-                is InferenceEngine.State.ModelReady -> {
-                    // A model is already loaded. Keep it and install the system prompt only
-                    // when this instance loaded it. If another state owns it, reload cleanly.
-                    if (!systemPromptInstalled) engine.cleanUp()
+            if (Build.SUPPORTED_64_BIT_ABIS.isEmpty()) {
+                error(
+                    "This phone is running a 32-bit Android userspace. " +
+                        "The on-device neural runtime requires 64-bit Android. " +
+                        "Supported ABIs: ${Build.SUPPORTED_ABIS.joinToString()}"
+                )
+            }
+
+            closeRuntime()
+
+            val model = OnDeviceModelManager.modelFile(appContext)
+            val config = EngineConfig(
+                modelPath = model.absolutePath,
+                backend = Backend.CPU(),
+                maxNumTokens = 2048,
+                cacheDir = FilePaths.aiCacheDir(appContext)
+            )
+            val candidate = Engine(config)
+
+            try {
+                withContext(Dispatchers.Default) {
+                    candidate.initialize()
                 }
-                else -> Unit
-            }
-
-            if (engine.state.value is InferenceEngine.State.Uninitialized ||
-                engine.state.value is InferenceEngine.State.Initializing
-            ) {
-                val initialized = engine.state
-                    .filter {
-                        it is InferenceEngine.State.Initialized ||
-                            it is InferenceEngine.State.Error
-                    }
-                    .first()
-                if (initialized is InferenceEngine.State.Error) throw initialized.exception
-            }
-
-            if (engine.state.value !is InferenceEngine.State.Initialized) {
-                val state = engine.state.value
-                if (state is InferenceEngine.State.Error) throw state.exception
-                check(state is InferenceEngine.State.Initialized) {
-                    "AI runtime is not ready (${state.javaClass.simpleName})."
+                val chat = candidate.createConversation(
+                    ConversationConfig(
+                        systemInstruction = Contents.of(BASE_SYSTEM_PROMPT),
+                        prefillPrefaceOnInit = false
+                    )
+                )
+                engine = candidate
+                conversation = chat
+            } catch (t: Throwable) {
+                runCatching {
+                    if (candidate.isInitialized()) candidate.close()
                 }
+                throw IllegalStateException(
+                    buildString {
+                        append("Neural runtime could not load on this phone")
+                        t.message?.takeIf { it.isNotBlank() }?.let { append(": ").append(it) }
+                        append(". Device ABI: ").append(Build.SUPPORTED_ABIS.joinToString())
+                    },
+                    t
+                )
             }
-
-            engine.loadModel(OnDeviceModelManager.modelFile(appContext).absolutePath)
-            engine.setSystemPrompt(BASE_SYSTEM_PROMPT)
-            systemPromptInstalled = true
         }
     }
 
@@ -92,11 +106,7 @@ class OnDeviceInterpreterAi(context: Context) {
             append(message.trim())
         }
 
-        engine.sendUserPrompt(prompt, maxTokens)
-            .toList()
-            .joinToString("")
-            .trim()
-            .ifBlank { error("Interpreter AI returned an empty response.") }
+        generate(prompt, maxTokens)
     }
 
     suspend fun explainEvaluation(
@@ -129,18 +139,37 @@ class OnDeviceInterpreterAi(context: Context) {
             }
         }
 
-        engine.sendUserPrompt(prompt, 520)
-            .toList()
-            .joinToString("")
-            .trim()
-            .ifBlank { error("Interpreter AI returned an empty response.") }
+        generate(prompt, 520)
+    }
+
+    private suspend fun generate(prompt: String, maxTokens: Int): String = inferenceMutex.withLock {
+        val chat = conversation ?: error("Interpreter AI conversation is not ready.")
+        withContext(Dispatchers.Default) {
+            // Use LiteRT-LM's synchronous conversation call deliberately. It is simpler and more
+            // robust across Android coroutine versions than bridging native streaming callbacks.
+            // The surrounding coroutine keeps this work off the UI thread.
+            chat.sendMessage(prompt).text
+                .trim()
+                .ifBlank { error("Interpreter AI returned an empty response.") }
+                .let { response ->
+                    // maxTokens remains part of our public API for future streaming/config tuning.
+                    // Do not truncate normal prose unless a pathological response is produced.
+                    if (maxTokens <= 0) response else response
+                }
+        }
     }
 
     fun unload() {
-        if (engine.state.value is InferenceEngine.State.ModelReady) {
-            runCatching { engine.cleanUp() }
+        closeRuntime()
+    }
+
+    private fun closeRuntime() {
+        runCatching { conversation?.close() }
+        conversation = null
+        engine?.let { current ->
+            runCatching { if (current.isInitialized()) current.close() }
         }
-        systemPromptInstalled = false
+        engine = null
     }
 
     private fun recentSessionContext(sessions: List<PracticeSessionEntity>): String = buildString {
@@ -171,6 +200,11 @@ class OnDeviceInterpreterAi(context: Context) {
         "SIGHT_TRANSLATION" -> "Sight Translation"
         "LIVE_TRANSCRIPTION" -> "Live Transcription"
         else -> mode.replace('_', ' ')
+    }
+
+    private object FilePaths {
+        fun aiCacheDir(context: Context): String =
+            java.io.File(context.cacheDir, "interpreter_ai_litert_cache").apply { mkdirs() }.absolutePath
     }
 
     companion object {

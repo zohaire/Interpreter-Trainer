@@ -35,7 +35,12 @@ fun InterpreterTrainerApp(sessionViewModel: SessionViewModel) {
         }
         composable(Routes.CONSECUTIVE) { ConsecutiveScreen(onBack = navController::popBackStack, sessionViewModel) }
         composable(Routes.TRANSCRIPTION) { LiveTranscriptionScreen(onBack = navController::popBackStack, sessionViewModel) }
-        composable(Routes.AI_COACH) { AiCoachScreen(onBack = navController::popBackStack) }
+        composable(Routes.AI_COACH) {
+            AiCoachScreen(
+                onBack = navController::popBackStack,
+                sessionViewModel = sessionViewModel
+            )
+        }
         composable(Routes.HISTORY) { HistoryScreen(onBack = navController::popBackStack, sessionViewModel) { id -> navController.navigate("history/$id") } }
         composable(
             Routes.HISTORY_DETAIL,

@@ -72,7 +72,7 @@ fun HistoryDetailScreen(id: Long, onBack: () -> Unit, sessionViewModel: SessionV
                 }
                 item.aiFeedback?.takeIf { it.isNotBlank() }?.let { feedback ->
                     SectionCard {
-                        Text("AI Coach feedback", style = MaterialTheme.typography.titleMedium)
+                        Text("Local Coach feedback", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
                         Text(feedback)
                     }

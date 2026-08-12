@@ -22,8 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.media3.ui.PlayerView
-import com.interpretertrainer.app.ai.AiBackendSettings
-import com.interpretertrainer.app.ai.AiCoachClient
+import com.interpretertrainer.app.ai.LocalInterpreterCoach
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.media.MediaController
 import com.interpretertrainer.app.media.ShadowingRecorder
@@ -32,7 +31,6 @@ import com.interpretertrainer.app.model.PracticeMode
 import com.interpretertrainer.app.util.formatDuration
 import com.interpretertrainer.app.viewmodel.SessionViewModel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
@@ -45,8 +43,6 @@ fun ShadowingScreen(
     val sourceMedia = remember { MediaController(context) }
     val recordingMedia = remember { MediaController(context) }
     val recorder = remember { ShadowingRecorder(context.applicationContext) }
-    val aiClient = remember { AiCoachClient() }
-    val scope = rememberCoroutineScope()
 
     var sourceName by rememberSaveable { mutableStateOf<String?>(null) }
     var notes by rememberSaveable { mutableStateOf("") }
@@ -55,29 +51,28 @@ fun ShadowingScreen(
     var recordingPath by rememberSaveable { mutableStateOf<String?>(null) }
     var recordingElapsed by rememberSaveable { mutableLongStateOf(0L) }
     var recordingStartedAt by rememberSaveable { mutableLongStateOf(0L) }
-    var aiFeedback by rememberSaveable { mutableStateOf("") }
-    var aiTranscript by rememberSaveable { mutableStateOf("") }
-    var aiScore by rememberSaveable { mutableStateOf<Int?>(null) }
-    var aiError by rememberSaveable { mutableStateOf<String?>(null) }
-    var aiLoading by remember { mutableStateOf(false) }
+    var sourceTranscript by rememberSaveable { mutableStateOf("") }
+    var traineeTranscript by rememberSaveable { mutableStateOf("") }
+    var localFeedback by rememberSaveable { mutableStateOf("") }
+    var localScore by rememberSaveable { mutableStateOf<Int?>(null) }
+    var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var isRecording by remember { mutableStateOf(false) }
-    var backendUrl by rememberSaveable { mutableStateOf(AiBackendSettings.getUrl(context)) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
             sourceName = it.lastPathSegment
             sourceMedia.load(it)
             recordingElapsed = 0L
-            aiFeedback = ""
-            aiTranscript = ""
-            aiScore = null
-            aiError = null
+            recordingPath = null
+            localFeedback = ""
+            localScore = null
+            errorMessage = null
         }
     }
 
     fun beginShadowing() {
         if (sourceName == null) {
-            aiError = "Choose an audio or video source first."
+            errorMessage = "Choose an audio or video source first."
             return
         }
         if (isRecording) return
@@ -88,14 +83,14 @@ fun ShadowingScreen(
             recordingPath = file.absolutePath
             recordingStartedAt = System.currentTimeMillis()
             recordingElapsed = 0L
-            aiFeedback = ""
-            aiTranscript = ""
-            aiScore = null
-            aiError = null
+            localFeedback = ""
+            localScore = null
+            errorMessage = null
             isRecording = true
+            sourceMedia.seekTo(0L)
             sourceMedia.play()
         }.onFailure {
-            aiError = it.message ?: "Could not start microphone recording."
+            errorMessage = it.message ?: "Could not start microphone recording."
             isRecording = false
         }
     }
@@ -103,11 +98,35 @@ fun ShadowingScreen(
     fun finishShadowing() {
         sourceMedia.pause()
         recorder.stop()?.let { recordingPath = it.absolutePath }
+        if (recordingStartedAt > 0L) {
+            recordingElapsed = System.currentTimeMillis() - recordingStartedAt
+        }
         isRecording = false
     }
 
+    fun generateLocalFeedback() {
+        val rawSourceDuration = sourceMedia.player.duration
+        val expectedSourceDuration = rawSourceDuration
+            .takeIf { it > 0L }
+            ?.let { (it / speed.coerceAtLeast(0.1f)).toLong() }
+        val traineeDuration = recordingElapsed.takeIf { it > 0L }
+
+        val report = LocalInterpreterCoach.analyze(
+            mode = PracticeMode.SHADOWING,
+            sourceText = sourceTranscript,
+            traineeText = traineeTranscript,
+            sourceLanguage = sourceLang.tag,
+            targetLanguage = sourceLang.tag,
+            sourceDurationMillis = expectedSourceDuration,
+            traineeDurationMillis = traineeDuration
+        )
+        localScore = report.overallScore
+        localFeedback = report.asPlainText()
+        errorMessage = null
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) beginShadowing() else aiError = "Microphone permission is required to record shadowing practice."
+        if (granted) beginShadowing() else errorMessage = "Microphone permission is required to record shadowing practice."
     }
 
     fun requestStart() {
@@ -121,6 +140,10 @@ fun ShadowingScreen(
     LaunchedEffect(isRecording) {
         while (isRecording) {
             recordingElapsed = System.currentTimeMillis() - recordingStartedAt
+            if (sourceMedia.player.duration > 0L && sourceMedia.player.currentPosition >= sourceMedia.player.duration - 100L) {
+                finishShadowing()
+                break
+            }
             delay(250)
         }
     }
@@ -152,7 +175,11 @@ fun ShadowingScreen(
                 modifier = Modifier.fillMaxWidth().height(210.dp)
             )
 
-            LanguageSelector("Practice language", sourceLang) { sourceLang = it }
+            LanguageSelector("Practice language", sourceLang) {
+                sourceLang = it
+                localFeedback = ""
+                localScore = null
+            }
 
             Text("Playback speed")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -163,6 +190,8 @@ fun ShadowingScreen(
                         onClick = {
                             speed = value
                             sourceMedia.setSpeed(value)
+                            localFeedback = ""
+                            localScore = null
                         },
                         label = { Text("${value}x") }
                     )
@@ -180,19 +209,17 @@ fun ShadowingScreen(
                 Text("Recording time: ${formatDuration(recordingElapsed)}")
                 Spacer(Modifier.height(10.dp))
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!isRecording) {
-                        Button(onClick = { requestStart() }, enabled = sourceName != null) {
-                            Icon(Icons.Default.Mic, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Start Shadowing")
-                        }
-                    } else {
-                        Button(onClick = { finishShadowing() }) {
-                            Icon(Icons.Default.Stop, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Stop & Save Recording")
-                        }
+                if (!isRecording) {
+                    Button(onClick = { requestStart() }, enabled = sourceName != null) {
+                        Icon(Icons.Default.Mic, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Start Shadowing + Recorder")
+                    }
+                } else {
+                    Button(onClick = { finishShadowing() }) {
+                        Icon(Icons.Default.Stop, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Stop & Save Recording")
                     }
                 }
 
@@ -218,79 +245,79 @@ fun ShadowingScreen(
             OutlinedTextField(
                 value = notes,
                 onValueChange = { notes = it },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 110.dp),
                 label = { Text("Notes") }
             )
 
             SectionCard {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Default.AutoAwesome, contentDescription = null)
-                    Text("AI Shadowing Feedback", style = MaterialTheme.typography.titleMedium)
-                }
-                Spacer(Modifier.height(8.dp))
-
-                if (backendUrl.isBlank()) {
-                    Text(
-                        "Configure the secure AI server before requesting feedback.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(onClick = {
-                        if (isRecording) finishShadowing()
-                        onOpenAiCoach()
-                    }) { Text("Configure AI Coach") }
-                } else {
-                    Button(
-                        enabled = !aiLoading && !isRecording && recordingPath?.let { File(it).exists() } == true,
-                        onClick = {
-                            val file = recordingPath?.let(::File) ?: return@Button
-                            aiLoading = true
-                            aiError = null
-                            scope.launch {
-                                aiClient.analyzeShadowing(
-                                    baseUrl = backendUrl,
-                                    recording = file,
-                                    languageTag = sourceLang.tag,
-                                    sourceName = sourceName,
-                                    notes = notes,
-                                    speed = speed
-                                ).onSuccess { result ->
-                                    aiTranscript = result.transcript
-                                    aiFeedback = result.feedback
-                                    aiScore = result.score
-                                }.onFailure {
-                                    aiError = it.message ?: "AI feedback request failed."
-                                }
-                                aiLoading = false
-                            }
-                        }
-                    ) {
-                        if (aiLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text(if (aiLoading) "Analyzing…" else "Generate AI Feedback")
+                    Column(Modifier.weight(1f)) {
+                        Text("Local Shadowing Coach", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Independent and offline. No external AI account or API key is used.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
-                aiError?.let {
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = sourceTranscript,
+                    onValueChange = {
+                        sourceTranscript = it
+                        localFeedback = ""
+                        localScore = null
+                    },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 110.dp),
+                    label = { Text("Source transcript (optional, recommended)") },
+                    placeholder = { Text("Paste what the original speaker says") }
+                )
+
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = traineeTranscript,
+                    onValueChange = {
+                        traineeTranscript = it
+                        localFeedback = ""
+                        localScore = null
+                    },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 110.dp),
+                    label = { Text("Your spoken transcript (optional, recommended)") },
+                    placeholder = { Text("Paste the transcript of your shadowing") }
+                )
+
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        enabled = !isRecording && (
+                            recordingElapsed > 0L ||
+                                sourceTranscript.isNotBlank() ||
+                                traineeTranscript.isNotBlank()
+                            ),
+                        onClick = { generateLocalFeedback() }
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Generate Local Feedback")
+                    }
+                    OutlinedButton(onClick = onOpenAiCoach) { Text("Full Coach") }
+                }
+
+                errorMessage?.let {
                     Spacer(Modifier.height(8.dp))
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
 
-                aiScore?.let {
+                localScore?.let {
                     Spacer(Modifier.height(10.dp))
-                    Text("AI score: $it / 100", style = MaterialTheme.typography.titleMedium)
+                    Text("Local score: $it / 100", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(progress = { it / 100f }, modifier = Modifier.fillMaxWidth())
                 }
-                if (aiTranscript.isNotBlank()) {
+                if (localFeedback.isNotBlank()) {
                     Spacer(Modifier.height(10.dp))
-                    Text("Recording transcript", style = MaterialTheme.typography.titleSmall)
-                    Text(aiTranscript)
-                }
-                if (aiFeedback.isNotBlank()) {
-                    Spacer(Modifier.height(10.dp))
-                    Text("Coach feedback", style = MaterialTheme.typography.titleSmall)
-                    Text(aiFeedback)
+                    Text(localFeedback)
                 }
             }
 
@@ -304,14 +331,14 @@ fun ShadowingScreen(
                             sourceLanguage = sourceLang.tag,
                             targetLanguage = sourceLang.tag,
                             startedAt = System.currentTimeMillis() - position,
-                            durationMillis = position,
+                            durationMillis = maxOf(position, recordingElapsed),
                             sourceName = sourceName,
-                            transcript = aiTranscript,
+                            transcript = traineeTranscript,
                             notes = notes,
                             segmentDurationSeconds = null,
                             status = "COMPLETED",
                             recordingPath = recordingPath,
-                            aiFeedback = aiFeedback.ifBlank { null }
+                            aiFeedback = localFeedback.ifBlank { null }
                         )
                     )
                 }

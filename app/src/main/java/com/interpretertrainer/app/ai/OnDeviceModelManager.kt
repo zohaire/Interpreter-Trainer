@@ -13,17 +13,24 @@ import java.net.URL
  * The model is stored in app-private storage and never bundled into the APK.
  */
 object OnDeviceModelManager {
-    const val MODEL_LABEL = "Qwen3-0.6B INT4 (no-thinking)"
-    const val MODEL_DOWNLOAD_SIZE_LABEL = "~347 MB"
+    // This artifact has published Android CPU/GPU benchmark results with LiteRT-LM.
+    // We intentionally prefer it over the newer 347 MB no-think artifact, which failed to
+    // initialize on a real arm64-v8a device with LiteRT-LM 0.14.0.
+    const val MODEL_LABEL = "Qwen3-0.6B mixed INT4 (Android-tested)"
+    const val MODEL_DOWNLOAD_SIZE_LABEL = "~475 MB"
 
-    private const val MODEL_FILE_NAME = "qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm"
+    private const val MODEL_FILE_NAME = "qwen3_0_6b_mixed_int4.litertlm"
     private const val MODEL_URL =
-        "https://huggingface.co/litert-community/Qwen3-0.6B-int4/resolve/main/qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm?download=true"
+        "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/qwen3_0_6b_mixed_int4.litertlm?download=true"
 
-    // Published artifact is about 347 MB. This guards against HTML/error pages and truncated files.
-    private const val MIN_EXPECTED_BYTES = 320_000_000L
+    // Published artifact is roughly 475 MiB. This protects against HTML/error pages and
+    // truncated downloads while leaving room for repository-side metadata changes.
+    private const val MIN_EXPECTED_BYTES = 450_000_000L
 
-    private const val LEGACY_MODEL_FILE = "qwen2.5-0.5b-instruct-q4_0.gguf"
+    private val LEGACY_MODEL_FILES = listOf(
+        "qwen2.5-0.5b-instruct-q4_0.gguf",
+        "qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm"
+    )
 
     private fun modelDirectory(context: Context): File =
         File(context.filesDir, "interpreter_ai").apply { mkdirs() }
@@ -124,15 +131,18 @@ object OnDeviceModelManager {
             connectTimeout = 30_000
             readTimeout = 90_000
             requestMethod = "GET"
-            setRequestProperty("User-Agent", "InterpreterTrainer/0.3 Android")
+            setRequestProperty("User-Agent", "InterpreterTrainer/0.3.1 Android")
             if (existingBytes > 0L) setRequestProperty("Range", "bytes=$existingBytes-")
         }
 
     private fun cleanupLegacyArtifacts(context: Context) {
         val dir = modelDirectory(context)
-        File(dir, LEGACY_MODEL_FILE).delete()
-        File(dir, "$LEGACY_MODEL_FILE.part").delete()
-        File(dir, "$LEGACY_MODEL_FILE.verified").delete()
+        LEGACY_MODEL_FILES.forEach { fileName ->
+            File(dir, fileName).delete()
+            File(dir, "$fileName.part").delete()
+            File(dir, "$fileName.verified").delete()
+            File(dir, "$fileName.complete").delete()
+        }
     }
 
     fun delete(context: Context) {

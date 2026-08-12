@@ -63,7 +63,7 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
           "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk \
             | tee /tmp/apk-signing.txt
-          grep -qi "49:19:da:73:df:56:00:c0:fb:d0:91:6d:6d:fa:ed:c6:c5:ee:4d:01:24:46:11:ee:0c:87:95:aa:fd:84:3d:46" /tmp/apk-signing.txt
+          grep -qi "4919da73df5600c0fbd0916d6dfaedc6c5ee4d01244611ee0c8795aafd843d46" /tmp/apk-signing.txt
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

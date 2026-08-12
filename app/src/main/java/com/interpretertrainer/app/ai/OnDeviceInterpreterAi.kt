@@ -66,8 +66,7 @@ class OnDeviceInterpreterAi(context: Context) {
                 }
                 val chat = candidate.createConversation(
                     ConversationConfig(
-                        systemInstruction = Contents.of(BASE_SYSTEM_PROMPT),
-                        prefillPrefaceOnInit = false
+                        systemInstruction = Contents.of(BASE_SYSTEM_PROMPT)
                     )
                 )
                 engine = candidate
@@ -145,15 +144,14 @@ class OnDeviceInterpreterAi(context: Context) {
     private suspend fun generate(prompt: String, maxTokens: Int): String = inferenceMutex.withLock {
         val chat = conversation ?: error("Interpreter AI conversation is not ready.")
         withContext(Dispatchers.Default) {
-            // Use LiteRT-LM's synchronous conversation call deliberately. It is simpler and more
-            // robust across Android coroutine versions than bridging native streaming callbacks.
-            // The surrounding coroutine keeps this work off the UI thread.
-            chat.sendMessage(prompt).text
+            // LiteRT-LM's synchronous API returns a Message. Its string representation is the
+            // primary textual assistant output for the simple text-only conversation used here.
+            chat.sendMessage(prompt)
+                .toString()
                 .trim()
                 .ifBlank { error("Interpreter AI returned an empty response.") }
                 .let { response ->
-                    // maxTokens remains part of our public API for future streaming/config tuning.
-                    // Do not truncate normal prose unless a pathological response is produced.
+                    // maxTokens remains part of our public API for future per-message tuning.
                     if (maxTokens <= 0) response else response
                 }
         }

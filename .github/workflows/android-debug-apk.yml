@@ -25,6 +25,17 @@ jobs:
         with:
           gradle-version: '8.13'
 
+      - name: Install stable development signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          base64 --decode .github/interpreter-debug.keystore.b64 > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+          keytool -list -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey >/dev/null
+          echo "Stable Interpreter Trainer development signing key installed."
+
       - name: Guard against destructive neural health probes
         shell: bash
         run: |
@@ -41,7 +52,18 @@ jobs:
           fi
 
       - name: Build debug APK
+        env:
+          INTERPRETER_VERSION_CODE: ${{ github.run_number }}
         run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify APK signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk \
+            | tee /tmp/apk-signing.txt
+          grep -qi "49:19:da:73:df:56:00:c0:fb:d0:91:6d:6d:fa:ed:c6:c5:ee:4d:01:24:46:11:ee:0c:87:95:aa:fd:84:3d:46" /tmp/apk-signing.txt
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

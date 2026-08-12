@@ -65,7 +65,10 @@ class OnDeviceInterpreterAi(context: Context) {
                 withContext(Dispatchers.Default) { candidate.initialize() }
                 val chat = candidate.createConversation(
                     ConversationConfig(
-                        systemInstruction = Contents.of(BASE_SYSTEM_PROMPT)
+                        systemInstruction = Contents.of(BASE_SYSTEM_PROMPT),
+                        // Qwen3 is a hybrid thinking model. For a mobile coaching chat we want the
+                        // concise assistant answer, not internal reasoning tokens.
+                        extraContext = mapOf("enable_thinking" to false)
                     )
                 )
                 engine = candidate

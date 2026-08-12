@@ -16,4 +16,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "InterpreterTrainer"
 include(":app")
-include(":llama-runtime")

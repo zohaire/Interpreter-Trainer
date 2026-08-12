@@ -4,50 +4,46 @@ import android.content.Context
 import android.os.Build
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Contents
-import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
+import java.io.File
+import java.util.ArrayDeque
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.util.Locale
+import kotlinx.coroutines.withTimeout
 
 /**
  * Real on-device neural chatbot backed by LiteRT-LM.
  *
- * The runtime is deliberately defensive because Android accelerator support varies by device:
- * - GPU is preferred for this model because it has a much smaller runtime memory footprint.
- * - CPU is an automatic fallback when GPU cannot initialize or invoke the model.
- * - A tiny hidden inference probe must succeed before the UI is allowed to say "AI ready".
- * - Any failed native send invalidates the conversation/engine instead of reusing poisoned state.
- * - Practice history is compacted and injected only once per runtime conversation so the 2048-token
- *   Qwen context is not consumed by repeatedly attaching the same session transcripts.
+ * Qwen3 + LiteRT-LM 0.14.0 can fail on the second send in the same Conversation because the
+ * regenerated prompt is not always a byte-for-byte extension of LiteRT-LM's cached prompt. The
+ * model itself is fine, so we keep one Engine loaded and create a fresh one-shot Conversation for
+ * every user message. A small recent-chat summary is carried manually so the coach still has useful
+ * conversational memory without entering the broken incremental-conversation path.
  */
 class OnDeviceInterpreterAi(context: Context) {
     private val appContext = context.applicationContext
     private val loadMutex = Mutex()
     private val inferenceMutex = Mutex()
+    private val historyMutex = Mutex()
+    private val recentChatTurns = ArrayDeque<ChatTurn>()
 
     @Volatile private var engine: Engine? = null
-    @Volatile private var conversation: Conversation? = null
     @Volatile private var activeBackend: RuntimeBackend? = null
-    @Volatile private var practiceContextPrimed = false
 
     fun isModelInstalled(): Boolean = OnDeviceModelManager.isInstalled(appContext)
 
-    fun isReady(): Boolean = engine?.isInitialized() == true && conversation != null
+    fun isReady(): Boolean = engine?.isInitialized() == true
 
     fun activeBackendLabel(): String? = activeBackend?.label
 
-    /**
-     * Loads the model and performs a real one-token-ish generation probe on the phone.
-     * Engine.initialize() alone is not considered readiness because some devices fail only when the
-     * first compiled-model prefill/decode is invoked.
-     */
     suspend fun ensureLoaded(): Result<Unit> = runCatching {
         loadMutex.withLock {
             if (isReady()) return@withLock
@@ -70,7 +66,7 @@ class OnDeviceInterpreterAi(context: Context) {
             val failures = mutableListOf<String>()
             for (backend in listOf(RuntimeBackend.GPU, RuntimeBackend.CPU)) {
                 try {
-                    loadRuntime(backend, runHealthProbe = true)
+                    loadRuntime(backend)
                     return@withLock
                 } catch (t: Throwable) {
                     failures += "${backend.label}: ${shortError(t)}"
@@ -79,8 +75,8 @@ class OnDeviceInterpreterAi(context: Context) {
             }
 
             error(
-                "The neural model file is installed, but this phone could not run an inference " +
-                    "with either GPU or CPU. ${failures.joinToString(" | ")}"
+                "The neural model file is installed, but this phone could not initialize the " +
+                    "runtime with either GPU or CPU. ${failures.joinToString(" | ")}"
             )
         }
     }
@@ -88,27 +84,21 @@ class OnDeviceInterpreterAi(context: Context) {
     suspend fun chat(
         message: String,
         sessions: List<PracticeSessionEntity>,
-        maxTokens: Int = 420
+        maxTokens: Int = 320
     ): Result<String> = runCatching {
         require(message.isNotBlank()) { "Message is empty." }
         ensureLoaded().getOrThrow()
 
-        val prompt = if (!practiceContextPrimed) {
-            buildString {
-                appendLine("Relevant saved-practice summary. Use it only when useful; never invent missing evidence.")
-                appendLine("<practice_context>")
-                append(compactRecentSessionContext(sessions))
-                appendLine("</practice_context>")
-                appendLine()
-                appendLine("User message:")
-                append(message.trim())
-            }
-        } else {
-            message.trim()
+        val cleanMessage = message.trim().take(MAX_USER_MESSAGE_CHARS)
+        val historySnapshot = historyMutex.withLock { recentChatTurns.toList() }
+        val prompt = buildChatPrompt(cleanMessage, sessions, historySnapshot)
+        val answer = generateWithRecovery(prompt, maxTokens)
+
+        historyMutex.withLock {
+            recentChatTurns.addLast(ChatTurn(cleanMessage, answer.take(MAX_HISTORY_ASSISTANT_CHARS)))
+            while (recentChatTurns.size > MAX_HISTORY_TURNS) recentChatTurns.removeFirst()
         }
 
-        val answer = generateWithRecovery(prompt, maxTokens)
-        practiceContextPrimed = true
         answer
     }
 
@@ -122,9 +112,6 @@ class OnDeviceInterpreterAi(context: Context) {
     ): Result<String> = runCatching {
         ensureLoaded().getOrThrow()
 
-        // Keep the entire request comfortably below this model's 2048-token context. Character
-        // caps are intentionally conservative because Arabic and mixed-language text can tokenize
-        // more densely than English.
         val prompt = buildString {
             appendLine("Explain this interpreter evaluation concisely. The LOCAL EVALUATOR REPORT is authoritative.")
             appendLine("Do not change its numbers or invent semantic accuracy. Give 2 to 4 practical exercises.")
@@ -132,42 +119,61 @@ class OnDeviceInterpreterAi(context: Context) {
             appendLine("Languages: $sourceLanguage -> $targetLanguage")
             appendLine()
             appendLine("LOCAL EVALUATOR REPORT:")
-            appendLine(evaluatorReport.take(1_600))
+            appendLine(evaluatorReport.take(1_000))
             if (sourceText.isNotBlank()) {
                 appendLine()
                 appendLine("SOURCE EXCERPT:")
-                appendLine(sourceText.take(700))
+                appendLine(sourceText.take(450))
             }
             if (traineeText.isNotBlank()) {
                 appendLine()
                 appendLine("TRAINEE EXCERPT:")
-                appendLine(traineeText.take(700))
+                appendLine(traineeText.take(450))
             }
         }
 
-        generateWithRecovery(prompt, 420)
+        generateWithRecovery(prompt, 320)
     }
 
-    /**
-     * Sends once on the current backend. If native invocation fails, the failed runtime is destroyed,
-     * the alternate backend is health-probed, and the same request is retried once. If that also
-     * fails, no broken Conversation is kept around for the next Send button press.
-     */
+    private fun buildChatPrompt(
+        message: String,
+        sessions: List<PracticeSessionEntity>,
+        history: List<ChatTurn>
+    ): String = buildString {
+        appendLine("Relevant saved-practice summary. Use it only when useful; never invent missing evidence.")
+        appendLine("<practice_context>")
+        append(compactRecentSessionContext(sessions))
+        appendLine("</practice_context>")
+
+        if (history.isNotEmpty()) {
+            appendLine()
+            appendLine("Recent conversation context:")
+            history.takeLast(MAX_HISTORY_TURNS).forEach { turn ->
+                appendLine("User: ${turn.user.take(MAX_HISTORY_USER_CHARS)}")
+                appendLine("Coach: ${turn.assistant.take(MAX_HISTORY_ASSISTANT_CHARS)}")
+            }
+        }
+
+        appendLine()
+        appendLine("Current user message:")
+        append(message)
+    }
+
     private suspend fun generateWithRecovery(prompt: String, maxTokens: Int): String =
         inferenceMutex.withLock {
             val firstBackend = activeBackend ?: error("Interpreter AI runtime is not ready.")
 
             try {
-                return@withLock sendCurrent(prompt, maxTokens)
+                return@withLock sendOneShot(prompt, maxTokens)
             } catch (firstFailure: Throwable) {
                 val alternate = firstBackend.alternate()
 
                 val retry = runCatching {
                     loadMutex.withLock {
                         closeRuntime()
-                        loadRuntime(alternate, runHealthProbe = true)
+                        loadRuntime(alternate)
                     }
-                    sendCurrent(prompt, maxTokens)
+                    sendOneShot(prompt, maxTokens)
                 }
 
                 retry.getOrNull()?.let { return@withLock it }
@@ -182,58 +188,70 @@ class OnDeviceInterpreterAi(context: Context) {
             }
         }
 
-    private suspend fun sendCurrent(prompt: String, maxTokens: Int): String {
-        val chat = conversation ?: error("Interpreter AI conversation is not ready.")
-        return withContext(Dispatchers.Default) {
-            // LiteRT-LM 0.14.0 Message.toString() returns its textual Contents.
-            val response = chat.sendMessage(prompt).toString().trim()
-            require(response.isNotBlank()) { "Interpreter AI returned an empty response." }
-            // LiteRT-LM's Conversation API does not expose a per-call max-output-token parameter;
-            // maxTokens is retained as part of our public API for a future streaming implementation.
-            if (maxTokens > 0) response else response
+    /**
+     * One user message = one native Conversation. This intentionally avoids LiteRT-LM's broken
+     * second-turn prefix-cache path for this Qwen3 artifact while keeping the expensive Engine live.
+     */
+    private suspend fun sendOneShot(prompt: String, maxTokens: Int): String {
+        val currentEngine = engine ?: error("Interpreter AI engine is not ready.")
+        val chat = currentEngine.createConversation(conversationConfig())
+        val rawOutput = StringBuilder()
+
+        try {
+            withTimeout(GENERATION_TIMEOUT_MS) {
+                withContext(Dispatchers.Default) {
+                    chat.sendMessageAsync(prompt).collect { chunk ->
+                        rawOutput.append(chunk.toString())
+                    }
+                }
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            runCatching { chat.cancelProcess() }
+            throw IllegalStateException("Neural generation timed out. The runtime was reset safely.", timeout)
+        } finally {
+            runCatching { chat.close() }
         }
+
+        val rawResponse = rawOutput.toString().trim()
+        require(rawResponse.isNotBlank()) { "Interpreter AI returned an empty response." }
+
+        val visibleResponse = removeThinking(rawResponse).trim()
+        require(visibleResponse.isNotBlank()) { "Interpreter AI returned no visible answer." }
+
+        return if (maxTokens > 0) visibleResponse.take(MAX_RESPONSE_CHARS) else visibleResponse
     }
 
-    private suspend fun loadRuntime(backend: RuntimeBackend, runHealthProbe: Boolean) {
+    private suspend fun loadRuntime(backend: RuntimeBackend) {
         val model = OnDeviceModelManager.modelFile(appContext)
         val candidate = Engine(
             EngineConfig(
                 modelPath = model.absolutePath,
                 backend = backend.engineBackend,
-                // Keep separate, versioned accelerator caches. Reusing a cache generated for a
-                // different model/backend can produce device-specific compiled-model failures.
+                maxNumTokens = MOBILE_CONTEXT_TOKENS,
                 cacheDir = FilePaths.aiCacheDir(appContext, backend)
             )
         )
 
         try {
             withContext(Dispatchers.Default) { candidate.initialize() }
-            val chat = candidate.createConversation(conversationConfig())
-
-            if (runHealthProbe) {
-                withContext(Dispatchers.Default) {
-                    val probe = chat.sendMessage("Runtime health check. Reply only: OK").toString().trim()
-                    require(probe.isNotBlank()) { "Runtime health check returned no text." }
-                }
-            }
-
             engine = candidate
-            conversation = chat
             activeBackend = backend
-            practiceContextPrimed = false
         } catch (t: Throwable) {
             runCatching { if (candidate.isInitialized()) candidate.close() }
             throw IllegalStateException(
-                "${backend.label} runtime could not complete a real neural inference: ${shortError(t)}",
+                "${backend.label} runtime could not initialize: ${shortError(t)}",
                 t
             )
         }
     }
 
+    /**
+     * Disabling Qwen thinking is safe here because every Conversation has exactly one user turn.
+     * The previous prefix mismatch happened only when LiteRT-LM attempted to render turn two from
+     * an already-cached Conversation.
+     */
     private fun conversationConfig() = ConversationConfig(
         systemInstruction = Contents.of(BASE_SYSTEM_PROMPT),
-        // This is the key used by Qwen3's bundled Jinja template to emit an empty thinking block
-        // and move straight to the user-visible answer.
         extraContext = mapOf("enable_thinking" to false)
     )
 
@@ -242,14 +260,11 @@ class OnDeviceInterpreterAi(context: Context) {
     }
 
     private fun closeRuntime() {
-        runCatching { conversation?.close() }
-        conversation = null
         engine?.let { current ->
             runCatching { if (current.isInitialized()) current.close() }
         }
         engine = null
         activeBackend = null
-        practiceContextPrimed = false
     }
 
     private fun compactRecentSessionContext(sessions: List<PracticeSessionEntity>): String = buildString {
@@ -268,20 +283,28 @@ class OnDeviceInterpreterAi(context: Context) {
 
             if (index == 0) {
                 session.notes.takeIf { it.isNotBlank() }?.let {
-                    appendLine("Notes: ${it.take(120)}")
-                }
-                session.transcript.takeIf { it.isNotBlank() }?.let {
-                    appendLine("Trainee excerpt: ${it.take(240)}")
+                    appendLine("Notes: ${it.replace('\n', ' ').take(90)}")
                 }
                 session.aiFeedback?.takeIf { it.isNotBlank() }?.let {
-                    appendLine("Saved evaluator summary: ${it.take(240)}")
-                }
-            } else {
-                session.aiFeedback?.takeIf { it.isNotBlank() }?.let {
-                    appendLine("Earlier evaluator summary: ${it.take(140)}")
+                    appendLine("Saved evaluator: ${it.replace('\n', ' ').take(150)}")
                 }
             }
         }
+    }.take(MAX_SESSION_CONTEXT_CHARS)
+
+    private fun removeThinking(value: String): String {
+        var result = value
+        while (true) {
+            val start = result.indexOf("<think>", ignoreCase = true)
+            if (start < 0) break
+            val end = result.indexOf("</think>", startIndex = start + 7, ignoreCase = true)
+            if (end < 0) {
+                result = result.substring(0, start)
+                break
+            }
+            result = result.removeRange(start, end + "</think>".length)
+        }
+        return result.trim()
     }
 
     private fun readableMode(mode: String): String = when (mode.uppercase(Locale.ROOT)) {
@@ -293,8 +316,6 @@ class OnDeviceInterpreterAi(context: Context) {
     }
 
     private fun cleanupObsoleteRuntimeCache() {
-        // This was shared by previous model/backend combinations. Leave the downloaded model alone;
-        // deleting cache data costs no network traffic and prevents stale compiled artifacts.
         runCatching { File(appContext.cacheDir, "interpreter_ai_litert_cache").deleteRecursively() }
     }
 
@@ -303,6 +324,8 @@ class OnDeviceInterpreterAi(context: Context) {
         val message = t.message?.replace('\n', ' ')?.trim().orEmpty()
         return if (message.isBlank()) t::class.java.simpleName else message.take(360)
     }
+
+    private data class ChatTurn(val user: String, val assistant: String)
 
     private enum class RuntimeBackend(
         val label: String,
@@ -318,11 +341,20 @@ class OnDeviceInterpreterAi(context: Context) {
         fun aiCacheDir(context: Context, backend: RuntimeBackend): String =
             File(
                 context.cacheDir,
-                "interpreter_ai_qwen3_mixed_int4_v2_${backend.name.lowercase(Locale.ROOT)}"
+                "interpreter_ai_qwen3_mixed_int4_v5_${backend.name.lowercase(Locale.ROOT)}"
             ).apply { mkdirs() }.absolutePath
     }
 
     companion object {
+        private const val MOBILE_CONTEXT_TOKENS = 1280
+        private const val GENERATION_TIMEOUT_MS = 60_000L
+        private const val MAX_SESSION_CONTEXT_CHARS = 600
+        private const val MAX_USER_MESSAGE_CHARS = 1_000
+        private const val MAX_RESPONSE_CHARS = 4_000
+        private const val MAX_HISTORY_TURNS = 2
+        private const val MAX_HISTORY_USER_CHARS = 300
+        private const val MAX_HISTORY_ASSISTANT_CHARS = 420
+
         private val BASE_SYSTEM_PROMPT = """
             You are Interpreter AI, a specialized coach for interpreters and interpretation students.
             Help with shadowing, consecutive interpreting, sight translation, note-taking, terminology,
@@ -330,8 +362,7 @@ class OnDeviceInterpreterAi(context: Context) {
             language (English, French or Arabic). Be concise, practical and specific. Never invent the
             user's performance, transcript, score or trend. Treat supplied evaluator numbers as
             authoritative and clearly distinguish evidence from inference. Keep answers focused on
-            interpreter training. A hidden runtime health-check may appear at startup; answer it exactly
-            as requested and never mention it later.
+            interpreter training.
         """.trimIndent()
     }
 }

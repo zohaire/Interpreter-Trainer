@@ -15,8 +15,8 @@ android {
         applicationId = "com.interpretertrainer.app"
         minSdk = 31
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -62,7 +62,8 @@ dependencies {
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
-    implementation(project(":llama-runtime"))
+    // Production Android runtime for on-device open-weight language models.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.14.0")
 
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.11.0")
@@ -77,7 +78,8 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // LiteRT-LM 0.14.0 is built against coroutines 1.11.0.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     implementation("androidx.room:room-runtime:2.8.4")
     implementation("androidx.room:room-ktx:2.8.4")

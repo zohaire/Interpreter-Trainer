@@ -4,46 +4,43 @@ import android.content.Context
 import android.os.Build
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Contents
-import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
+import java.io.File
+import java.util.ArrayDeque
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import java.io.File
-import java.util.Locale
 
 /**
  * Real on-device neural chatbot backed by LiteRT-LM.
  *
- * The runtime is deliberately defensive because Android accelerator support varies by device:
- * - GPU is preferred for this model because it usually needs less runtime memory.
- * - CPU is an automatic fallback when GPU cannot initialize or invoke the model.
- * - Readiness is based on engine/conversation initialization only; no hidden user turn is consumed.
- * - Generation uses LiteRT-LM's coroutine streaming API and has a hard timeout.
- * - Qwen's native thinking format is kept internally so sequential conversation rendering remains
- *   prefix-stable; thinking text is stripped only from the answer shown in the app.
- * - Any failed native send invalidates the conversation/engine instead of reusing poisoned state.
- * - Practice history is compacted and injected only once per runtime conversation.
+ * Qwen3 + LiteRT-LM 0.14.0 can fail on the second send in the same Conversation because the
+ * regenerated prompt is not always a byte-for-byte extension of LiteRT-LM's cached prompt. The
+ * model itself is fine, so we keep one Engine loaded and create a fresh one-shot Conversation for
+ * every user message. A small recent-chat summary is carried manually so the coach still has useful
+ * conversational memory without entering the broken incremental-conversation path.
  */
 class OnDeviceInterpreterAi(context: Context) {
     private val appContext = context.applicationContext
     private val loadMutex = Mutex()
     private val inferenceMutex = Mutex()
+    private val historyMutex = Mutex()
+    private val recentChatTurns = ArrayDeque<ChatTurn>()
 
     @Volatile private var engine: Engine? = null
-    @Volatile private var conversation: Conversation? = null
     @Volatile private var activeBackend: RuntimeBackend? = null
-    @Volatile private var practiceContextPrimed = false
 
     fun isModelInstalled(): Boolean = OnDeviceModelManager.isInstalled(appContext)
 
-    fun isReady(): Boolean = engine?.isInitialized() == true && conversation != null
+    fun isReady(): Boolean = engine?.isInitialized() == true
 
     fun activeBackendLabel(): String? = activeBackend?.label
 
@@ -93,22 +90,15 @@ class OnDeviceInterpreterAi(context: Context) {
         ensureLoaded().getOrThrow()
 
         val cleanMessage = message.trim().take(MAX_USER_MESSAGE_CHARS)
-        val prompt = if (!practiceContextPrimed) {
-            buildString {
-                appendLine("Relevant saved-practice summary. Use it only when useful; never invent missing evidence.")
-                appendLine("<practice_context>")
-                append(compactRecentSessionContext(sessions))
-                appendLine("</practice_context>")
-                appendLine()
-                appendLine("User message:")
-                append(cleanMessage)
-            }
-        } else {
-            cleanMessage
+        val historySnapshot = historyMutex.withLock { recentChatTurns.toList() }
+        val prompt = buildChatPrompt(cleanMessage, sessions, historySnapshot)
+        val answer = generateWithRecovery(prompt, maxTokens)
+
+        historyMutex.withLock {
+            recentChatTurns.addLast(ChatTurn(cleanMessage, answer.take(MAX_HISTORY_ASSISTANT_CHARS)))
+            while (recentChatTurns.size > MAX_HISTORY_TURNS) recentChatTurns.removeFirst()
         }
 
-        val answer = generateWithRecovery(prompt, maxTokens)
-        practiceContextPrimed = true
         answer
     }
 
@@ -129,20 +119,44 @@ class OnDeviceInterpreterAi(context: Context) {
             appendLine("Languages: $sourceLanguage -> $targetLanguage")
             appendLine()
             appendLine("LOCAL EVALUATOR REPORT:")
-            appendLine(evaluatorReport.take(1_500))
+            appendLine(evaluatorReport.take(1_000))
             if (sourceText.isNotBlank()) {
                 appendLine()
                 appendLine("SOURCE EXCERPT:")
-                appendLine(sourceText.take(600))
+                appendLine(sourceText.take(450))
             }
             if (traineeText.isNotBlank()) {
                 appendLine()
                 appendLine("TRAINEE EXCERPT:")
-                appendLine(traineeText.take(600))
+                appendLine(traineeText.take(450))
             }
         }
 
-        generateWithRecovery(prompt, 360)
+        generateWithRecovery(prompt, 320)
+    }
+
+    private fun buildChatPrompt(
+        message: String,
+        sessions: List<PracticeSessionEntity>,
+        history: List<ChatTurn>
+    ): String = buildString {
+        appendLine("Relevant saved-practice summary. Use it only when useful; never invent missing evidence.")
+        appendLine("<practice_context>")
+        append(compactRecentSessionContext(sessions))
+        appendLine("</practice_context>")
+
+        if (history.isNotEmpty()) {
+            appendLine()
+            appendLine("Recent conversation context:")
+            history.takeLast(MAX_HISTORY_TURNS).forEach { turn ->
+                appendLine("User: ${turn.user.take(MAX_HISTORY_USER_CHARS)}")
+                appendLine("Coach: ${turn.assistant.take(MAX_HISTORY_ASSISTANT_CHARS)}")
+            }
+        }
+
+        appendLine()
+        appendLine("Current user message:")
+        append(message)
     }
 
     private suspend fun generateWithRecovery(prompt: String, maxTokens: Int): String =
@@ -150,7 +164,7 @@ class OnDeviceInterpreterAi(context: Context) {
             val firstBackend = activeBackend ?: error("Interpreter AI runtime is not ready.")
 
             try {
-                return@withLock sendCurrent(prompt, maxTokens)
+                return@withLock sendOneShot(prompt, maxTokens)
             } catch (firstFailure: Throwable) {
                 val alternate = firstBackend.alternate()
 
@@ -159,7 +173,7 @@ class OnDeviceInterpreterAi(context: Context) {
                         closeRuntime()
                         loadRuntime(alternate)
                     }
-                    sendCurrent(prompt, maxTokens)
+                    sendOneShot(prompt, maxTokens)
                 }
 
                 retry.getOrNull()?.let { return@withLock it }
@@ -175,19 +189,27 @@ class OnDeviceInterpreterAi(context: Context) {
         }
 
     /**
-     * Keep the model's full native response in the Conversation so LiteRT-LM can render the next
-     * turn as an exact extension of the cached prompt. Only sanitize the copy returned to the UI.
+     * One user message = one native Conversation. This intentionally avoids LiteRT-LM's broken
+     * second-turn prefix-cache path for this Qwen3 artifact while keeping the expensive Engine live.
      */
-    private suspend fun sendCurrent(prompt: String, maxTokens: Int): String {
-        val chat = conversation ?: error("Interpreter AI conversation is not ready.")
+    private suspend fun sendOneShot(prompt: String, maxTokens: Int): String {
+        val currentEngine = engine ?: error("Interpreter AI engine is not ready.")
+        val chat = currentEngine.createConversation(conversationConfig())
         val rawOutput = StringBuilder()
 
-        withTimeout(GENERATION_TIMEOUT_MS) {
-            withContext(Dispatchers.Default) {
-                chat.sendMessageAsync(prompt).collect { chunk ->
-                    rawOutput.append(chunk.toString())
+        try {
+            withTimeout(GENERATION_TIMEOUT_MS) {
+                withContext(Dispatchers.Default) {
+                    chat.sendMessageAsync(prompt).collect { chunk ->
+                        rawOutput.append(chunk.toString())
+                    }
                 }
             }
+        } catch (timeout: TimeoutCancellationException) {
+            runCatching { chat.cancelProcess() }
+            throw IllegalStateException("Neural generation timed out. The runtime was reset safely.", timeout)
+        } finally {
+            runCatching { chat.close() }
         }
 
         val rawResponse = rawOutput.toString().trim()
@@ -212,12 +234,8 @@ class OnDeviceInterpreterAi(context: Context) {
 
         try {
             withContext(Dispatchers.Default) { candidate.initialize() }
-            val chat = candidate.createConversation(conversationConfig())
-
             engine = candidate
-            conversation = chat
             activeBackend = backend
-            practiceContextPrimed = false
         } catch (t: Throwable) {
             runCatching { if (candidate.isInitialized()) candidate.close() }
             throw IllegalStateException(
@@ -228,13 +246,13 @@ class OnDeviceInterpreterAi(context: Context) {
     }
 
     /**
-     * Do not force enable_thinking=false here. With this Qwen3 artifact, LiteRT-LM 0.14.0 inserts
-     * an empty thinking block while rendering generation but stores the first assistant answer
-     * without it, making turn two fail its incremental-prefix check. Let Qwen preserve its native
-     * format internally and remove thinking only from the displayed response.
+     * Disabling Qwen thinking is safe here because every Conversation has exactly one user turn.
+     * The previous prefix mismatch happened only when LiteRT-LM attempted to render turn two from
+     * an already-cached Conversation.
      */
     private fun conversationConfig() = ConversationConfig(
-        systemInstruction = Contents.of(BASE_SYSTEM_PROMPT)
+        systemInstruction = Contents.of(BASE_SYSTEM_PROMPT),
+        extraContext = mapOf("enable_thinking" to false)
     )
 
     fun unload() {
@@ -242,14 +260,11 @@ class OnDeviceInterpreterAi(context: Context) {
     }
 
     private fun closeRuntime() {
-        runCatching { conversation?.close() }
-        conversation = null
         engine?.let { current ->
             runCatching { if (current.isInitialized()) current.close() }
         }
         engine = null
         activeBackend = null
-        practiceContextPrimed = false
     }
 
     private fun compactRecentSessionContext(sessions: List<PracticeSessionEntity>): String = buildString {
@@ -268,14 +283,10 @@ class OnDeviceInterpreterAi(context: Context) {
 
             if (index == 0) {
                 session.notes.takeIf { it.isNotBlank() }?.let {
-                    appendLine("Notes: ${it.replace('\n', ' ').take(100)}")
+                    appendLine("Notes: ${it.replace('\n', ' ').take(90)}")
                 }
                 session.aiFeedback?.takeIf { it.isNotBlank() }?.let {
-                    appendLine("Saved evaluator summary: ${it.replace('\n', ' ').take(180)}")
-                }
-            } else {
-                session.aiFeedback?.takeIf { it.isNotBlank() }?.let {
-                    appendLine("Earlier evaluator summary: ${it.replace('\n', ' ').take(100)}")
+                    appendLine("Saved evaluator: ${it.replace('\n', ' ').take(150)}")
                 }
             }
         }
@@ -314,6 +325,8 @@ class OnDeviceInterpreterAi(context: Context) {
         return if (message.isBlank()) t::class.java.simpleName else message.take(360)
     }
 
+    private data class ChatTurn(val user: String, val assistant: String)
+
     private enum class RuntimeBackend(
         val label: String,
         val engineBackend: Backend
@@ -328,16 +341,19 @@ class OnDeviceInterpreterAi(context: Context) {
         fun aiCacheDir(context: Context, backend: RuntimeBackend): String =
             File(
                 context.cacheDir,
-                "interpreter_ai_qwen3_mixed_int4_v4_${backend.name.lowercase(Locale.ROOT)}"
+                "interpreter_ai_qwen3_mixed_int4_v5_${backend.name.lowercase(Locale.ROOT)}"
             ).apply { mkdirs() }.absolutePath
     }
 
     companion object {
         private const val MOBILE_CONTEXT_TOKENS = 1280
         private const val GENERATION_TIMEOUT_MS = 60_000L
-        private const val MAX_SESSION_CONTEXT_CHARS = 800
-        private const val MAX_USER_MESSAGE_CHARS = 1_500
-        private const val MAX_RESPONSE_CHARS = 6_000
+        private const val MAX_SESSION_CONTEXT_CHARS = 600
+        private const val MAX_USER_MESSAGE_CHARS = 1_000
+        private const val MAX_RESPONSE_CHARS = 4_000
+        private const val MAX_HISTORY_TURNS = 2
+        private const val MAX_HISTORY_USER_CHARS = 300
+        private const val MAX_HISTORY_ASSISTANT_CHARS = 420
 
         private val BASE_SYSTEM_PROMPT = """
             You are Interpreter AI, a specialized coach for interpreters and interpretation students.
@@ -346,7 +362,7 @@ class OnDeviceInterpreterAi(context: Context) {
             language (English, French or Arabic). Be concise, practical and specific. Never invent the
             user's performance, transcript, score or trend. Treat supplied evaluator numbers as
             authoritative and clearly distinguish evidence from inference. Keep answers focused on
-            interpreter training. Keep internal reasoning brief; the app will only show your final answer.
+            interpreter training.
         """.trimIndent()
     }
 }

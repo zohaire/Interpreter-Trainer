@@ -25,6 +25,17 @@ jobs:
         with:
           gradle-version: '8.13'
 
+      - name: Guard against destructive neural health probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          AI_FILE="app/src/main/java/com/interpretertrainer/app/ai/OnDeviceInterpreterAi.kt"
+          if grep -q "Runtime health check" "$AI_FILE"; then
+            echo "A hidden sendMessage health probe would consume the first conversation turn."
+            exit 1
+          fi
+          grep -q "sendMessageAsync" "$AI_FILE"
+
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 
@@ -62,13 +73,48 @@ jobs:
             --output "$MODEL_PATH" "$MODEL_URL"
           test "$(stat -c%s "$MODEL_PATH")" -gt 450000000
 
-      - name: Initialize model and generate a real response
+      - name: Generate two sequential streamed chat turns
         shell: bash
         run: |
           set -euo pipefail
-          timeout 15m litert-lm run \
-            /tmp/qwen3_0_6b_mixed_int4.litertlm \
-            --backend=cpu \
-            --prompt="You are an interpreter coach. Reply in one short sentence confirming that neural inference works." \
-            | tee /tmp/interpreter-ai-smoke.log
-          test -s /tmp/interpreter-ai-smoke.log
+          timeout 15m python - <<'PY'
+          import litert_lm
+
+          model_path = "/tmp/qwen3_0_6b_mixed_int4.litertlm"
+
+          def text_from_chunk(chunk):
+              parts = []
+              for item in chunk.get("content", []) or []:
+                  if isinstance(item, dict) and item.get("type") == "text":
+                      parts.append(item.get("text", ""))
+              return "".join(parts)
+
+          with litert_lm.Engine(
+              model_path,
+              backend=litert_lm.Backend.CPU(),
+              max_num_tokens=1280,
+          ) as engine:
+              with engine.create_conversation(
+                  system_message="You are a concise interpreter coach.",
+                  extra_context={"enable_thinking": False},
+                  max_output_tokens=64,
+              ) as conversation:
+                  outputs = []
+                  prompts = [
+                      "Reply in a few words confirming the first streamed turn works.",
+                      "Reply in a few words confirming the second streamed turn works too.",
+                  ]
+                  for prompt in prompts:
+                      text = ""
+                      for chunk in conversation.send_message_async(
+                          prompt,
+                          max_output_tokens=64,
+                      ):
+                          text += text_from_chunk(chunk)
+                      if not text.strip():
+                          raise RuntimeError(f"Empty neural response for prompt: {prompt}")
+                      outputs.append(text.strip())
+
+          print("FIRST:", outputs[0])
+          print("SECOND:", outputs[1])
+          PY

@@ -29,7 +29,7 @@ fun HomeScreen(onNavigate: (String) -> Unit) {
             item { TrainingCard("Shadowing", "Play audio/video while recording your own shadowing performance.", Icons.Default.GraphicEq) { onNavigate(Routes.SHADOWING) } }
             item { TrainingCard("Consecutive Interpretation", "Practice reliable 15, 30 or 60 second segments.", Icons.Default.SkipNext) { onNavigate(Routes.CONSECUTIVE) } }
             item { TrainingCard("Live Transcription", "Practice speech recognition in Arabic, English or French.", Icons.Default.Mic) { onNavigate(Routes.TRANSCRIPTION) } }
-            item { TrainingCard("AI Interpreter Coach", "Ask an interpreter-focused AI assistant and configure AI feedback.", Icons.Default.AutoAwesome) { onNavigate(Routes.AI_COACH) } }
+            item { TrainingCard("Local Interpreter Coach", "Independent offline scoring and feedback specialized for interpreter practice.", Icons.Default.AutoAwesome) { onNavigate(Routes.AI_COACH) } }
             item { TrainingCard("Practice History", "Review saved sessions, notes, transcripts, recordings and feedback.", Icons.Default.History) { onNavigate(Routes.HISTORY) } }
         }
     }

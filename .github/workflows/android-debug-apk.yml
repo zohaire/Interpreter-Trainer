@@ -63,9 +63,28 @@ jobs:
         run: |
           set -euo pipefail
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+
+          # Derive the expected certificate fingerprint from the exact keystore installed above.
+          # This validates that the APK is signed with our stable development key without relying
+          # on a stale hard-coded fingerprint.
+          keytool -exportcert \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -file /tmp/interpreter-debug-cert.der >/dev/null 2>&1
+          EXPECTED_SHA256="$(sha256sum /tmp/interpreter-debug-cert.der | awk '{print tolower($1)}')"
+
           "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk \
             | tee /tmp/apk-signing.txt
-          grep -qi "4919da73df5600c0fbd0916d6dfaedc6c5ee4d01244611ee0c8795aafd843d46" /tmp/apk-signing.txt
+          ACTUAL_SHA256="$(awk -F': ' '/certificate SHA-256 digest:/ {print tolower($2); exit}' /tmp/apk-signing.txt | tr -d '[:space:]')"
+
+          if [ -z "$ACTUAL_SHA256" ] || [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+            echo "APK signing certificate mismatch."
+            echo "Expected: $EXPECTED_SHA256"
+            echo "Actual:   ${ACTUAL_SHA256:-missing}"
+            exit 1
+          fi
+          echo "APK signing certificate matches the stable Interpreter Trainer development key."
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

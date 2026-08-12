@@ -17,6 +17,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.interpretertrainer.app.R
+import com.interpretertrainer.app.media.AudioRouteKind
+import com.interpretertrainer.app.media.rememberAudioOutputRoute
 import com.interpretertrainer.app.ui.Routes
 import com.interpretertrainer.app.ui.theme.ThemeMode
 
@@ -27,6 +29,7 @@ fun HomeScreen(
     onThemeModeChange: (ThemeMode) -> Unit
 ) {
     val context = LocalContext.current
+    val audioRoute = rememberAudioOutputRoute()
 
     Scaffold { padding ->
         LazyColumn(
@@ -66,6 +69,30 @@ fun HomeScreen(
                                 "Practice. Record. Review. Improve.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            if (audioRoute.isExternal) {
+                                Spacer(Modifier.height(9.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = when (audioRoute.kind) {
+                                            AudioRouteKind.BLUETOOTH -> Icons.Default.Bluetooth
+                                            AudioRouteKind.WIRED -> Icons.Default.Headphones
+                                            AudioRouteKind.EXTERNAL -> Icons.Default.SettingsInputComponent
+                                            AudioRouteKind.SPEAKER -> Icons.Default.VolumeUp
+                                        },
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        audioRoute.deviceName ?: audioRoute.label,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
                         }
                     }
                 }

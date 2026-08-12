@@ -29,10 +29,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/.android"
-          base64 --decode .github/interpreter-debug.keystore.b64 > "$HOME/.android/debug.keystore"
-          chmod 600 "$HOME/.android/debug.keystore"
-          keytool -list -keystore "$HOME/.android/debug.keystore" \
+          KEYSTORE="$RUNNER_TEMP/interpreter-debug.keystore"
+          base64 --decode .github/interpreter-debug.keystore.b64 > "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+          keytool -list -keystore "$KEYSTORE" \
             -storepass android -alias androiddebugkey >/dev/null
           echo "Stable Interpreter Trainer development signing key installed."
 
@@ -56,6 +56,7 @@ jobs:
       - name: Build debug APK
         env:
           INTERPRETER_VERSION_CODE: ${{ github.run_number }}
+          INTERPRETER_DEBUG_KEYSTORE: ${{ runner.temp }}/interpreter-debug.keystore
         run: gradle --no-daemon :app:assembleDebug
 
       - name: Verify APK signing certificate
@@ -63,12 +64,10 @@ jobs:
         run: |
           set -euo pipefail
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          KEYSTORE="$RUNNER_TEMP/interpreter-debug.keystore"
 
-          # Derive the expected certificate fingerprint from the exact keystore installed above.
-          # This validates that the APK is signed with our stable development key without relying
-          # on a stale hard-coded fingerprint.
           keytool -exportcert \
-            -keystore "$HOME/.android/debug.keystore" \
+            -keystore "$KEYSTORE" \
             -storepass android \
             -alias androiddebugkey \
             -file /tmp/interpreter-debug-cert.der >/dev/null 2>&1

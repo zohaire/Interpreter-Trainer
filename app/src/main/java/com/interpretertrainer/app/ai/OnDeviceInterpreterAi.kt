@@ -24,12 +24,12 @@ import java.util.Locale
  * The runtime is deliberately defensive because Android accelerator support varies by device:
  * - GPU is preferred for this model because it usually needs less runtime memory.
  * - CPU is an automatic fallback when GPU cannot initialize or invoke the model.
- * - Readiness is based on engine/conversation initialization only; we do NOT consume a hidden
- *   sendMessage call before the user's first message.
- * - Generation uses LiteRT-LM's coroutine streaming API instead of repeated synchronous JNI calls.
+ * - Readiness is based on engine/conversation initialization only; no hidden user turn is consumed.
+ * - Generation uses LiteRT-LM's coroutine streaming API and has a hard timeout.
+ * - Qwen's native thinking format is kept internally so sequential conversation rendering remains
+ *   prefix-stable; thinking text is stripped only from the answer shown in the app.
  * - Any failed native send invalidates the conversation/engine instead of reusing poisoned state.
- * - Practice history is compacted and injected only once per runtime conversation so the 2048-token
- *   Qwen context is not consumed by repeatedly attaching the same session transcripts.
+ * - Practice history is compacted and injected only once per runtime conversation.
  */
 class OnDeviceInterpreterAi(context: Context) {
     private val appContext = context.applicationContext
@@ -145,11 +145,6 @@ class OnDeviceInterpreterAi(context: Context) {
         generateWithRecovery(prompt, 360)
     }
 
-    /**
-     * Sends once on the current backend. If native invocation fails, the failed runtime is destroyed,
-     * the alternate backend is initialized, and the same request is retried once. If that also fails,
-     * no broken Conversation is kept around for the next Send button press.
-     */
     private suspend fun generateWithRecovery(prompt: String, maxTokens: Int): String =
         inferenceMutex.withLock {
             val firstBackend = activeBackend ?: error("Interpreter AI runtime is not ready.")
@@ -180,27 +175,28 @@ class OnDeviceInterpreterAi(context: Context) {
         }
 
     /**
-     * Use the Flow API recommended for coroutine callers. It avoids tying the UI to a blocking JNI
-     * send call and lets cancellation/timeouts unwind instead of leaving the Send button spinning.
+     * Keep the model's full native response in the Conversation so LiteRT-LM can render the next
+     * turn as an exact extension of the cached prompt. Only sanitize the copy returned to the UI.
      */
     private suspend fun sendCurrent(prompt: String, maxTokens: Int): String {
         val chat = conversation ?: error("Interpreter AI conversation is not ready.")
-        val output = StringBuilder()
+        val rawOutput = StringBuilder()
 
         withTimeout(GENERATION_TIMEOUT_MS) {
             withContext(Dispatchers.Default) {
                 chat.sendMessageAsync(prompt).collect { chunk ->
-                    output.append(chunk.toString())
+                    rawOutput.append(chunk.toString())
                 }
             }
         }
 
-        val response = output.toString().trim()
-        require(response.isNotBlank()) { "Interpreter AI returned an empty response." }
+        val rawResponse = rawOutput.toString().trim()
+        require(rawResponse.isNotBlank()) { "Interpreter AI returned an empty response." }
 
-        // LiteRT-LM limits the entire KV cache rather than exposing a per-call output token limit.
-        // Bound extreme output for UI safety while retaining maxTokens as call-site intent.
-        return if (maxTokens > 0) response.take(MAX_RESPONSE_CHARS) else response
+        val visibleResponse = removeThinking(rawResponse).trim()
+        require(visibleResponse.isNotBlank()) { "Interpreter AI returned no visible answer." }
+
+        return if (maxTokens > 0) visibleResponse.take(MAX_RESPONSE_CHARS) else visibleResponse
     }
 
     private suspend fun loadRuntime(backend: RuntimeBackend) {
@@ -209,11 +205,7 @@ class OnDeviceInterpreterAi(context: Context) {
             EngineConfig(
                 modelPath = model.absolutePath,
                 backend = backend.engineBackend,
-                // The model supports 2048 tokens. A smaller working window reduces KV-cache memory
-                // pressure on phones while still leaving enough room for compact coaching context.
                 maxNumTokens = MOBILE_CONTEXT_TOKENS,
-                // Keep separate, versioned accelerator caches. Reusing a cache generated for a
-                // different model/backend can produce device-specific compiled-model failures.
                 cacheDir = FilePaths.aiCacheDir(appContext, backend)
             )
         )
@@ -235,9 +227,14 @@ class OnDeviceInterpreterAi(context: Context) {
         }
     }
 
+    /**
+     * Do not force enable_thinking=false here. With this Qwen3 artifact, LiteRT-LM 0.14.0 inserts
+     * an empty thinking block while rendering generation but stores the first assistant answer
+     * without it, making turn two fail its incremental-prefix check. Let Qwen preserve its native
+     * format internally and remove thinking only from the displayed response.
+     */
     private fun conversationConfig() = ConversationConfig(
-        systemInstruction = Contents.of(BASE_SYSTEM_PROMPT),
-        extraContext = mapOf("enable_thinking" to false)
+        systemInstruction = Contents.of(BASE_SYSTEM_PROMPT)
     )
 
     fun unload() {
@@ -284,6 +281,21 @@ class OnDeviceInterpreterAi(context: Context) {
         }
     }.take(MAX_SESSION_CONTEXT_CHARS)
 
+    private fun removeThinking(value: String): String {
+        var result = value
+        while (true) {
+            val start = result.indexOf("<think>", ignoreCase = true)
+            if (start < 0) break
+            val end = result.indexOf("</think>", startIndex = start + 7, ignoreCase = true)
+            if (end < 0) {
+                result = result.substring(0, start)
+                break
+            }
+            result = result.removeRange(start, end + "</think>".length)
+        }
+        return result.trim()
+    }
+
     private fun readableMode(mode: String): String = when (mode.uppercase(Locale.ROOT)) {
         "SHADOWING" -> "Shadowing"
         "CONSECUTIVE" -> "Consecutive Interpretation"
@@ -293,7 +305,6 @@ class OnDeviceInterpreterAi(context: Context) {
     }
 
     private fun cleanupObsoleteRuntimeCache() {
-        // Leave the downloaded model alone; deleting old accelerator cache costs no network traffic.
         runCatching { File(appContext.cacheDir, "interpreter_ai_litert_cache").deleteRecursively() }
     }
 
@@ -317,7 +328,7 @@ class OnDeviceInterpreterAi(context: Context) {
         fun aiCacheDir(context: Context, backend: RuntimeBackend): String =
             File(
                 context.cacheDir,
-                "interpreter_ai_qwen3_mixed_int4_v3_${backend.name.lowercase(Locale.ROOT)}"
+                "interpreter_ai_qwen3_mixed_int4_v4_${backend.name.lowercase(Locale.ROOT)}"
             ).apply { mkdirs() }.absolutePath
     }
 
@@ -335,7 +346,7 @@ class OnDeviceInterpreterAi(context: Context) {
             language (English, French or Arabic). Be concise, practical and specific. Never invent the
             user's performance, transcript, score or trend. Treat supplied evaluator numbers as
             authoritative and clearly distinguish evidence from inference. Keep answers focused on
-            interpreter training.
+            interpreter training. Keep internal reasoning brief; the app will only show your final answer.
         """.trimIndent()
     }
 }

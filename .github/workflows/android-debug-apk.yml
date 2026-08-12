@@ -35,6 +35,10 @@ jobs:
             exit 1
           fi
           grep -q "sendMessageAsync" "$AI_FILE"
+          if grep -q 'extraContext = mapOf("enable_thinking" to false)' "$AI_FILE"; then
+            echo "Forcing Qwen thinking off breaks LiteRT-LM incremental rendering on turn two."
+            exit 1
+          fi
 
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
@@ -87,6 +91,9 @@ jobs:
               for item in chunk.get("content", []) or []:
                   if isinstance(item, dict) and item.get("type") == "text":
                       parts.append(item.get("text", ""))
+              for value in (chunk.get("channels", {}) or {}).values():
+                  if isinstance(value, str):
+                      parts.append(value)
               return "".join(parts)
 
           with litert_lm.Engine(
@@ -95,9 +102,8 @@ jobs:
               max_num_tokens=1280,
           ) as engine:
               with engine.create_conversation(
-                  system_message="You are a concise interpreter coach.",
-                  extra_context={"enable_thinking": False},
-                  max_output_tokens=64,
+                  system_message="You are a concise interpreter coach. Keep internal reasoning short.",
+                  max_output_tokens=80,
               ) as conversation:
                   outputs = []
                   prompts = [
@@ -108,13 +114,13 @@ jobs:
                       text = ""
                       for chunk in conversation.send_message_async(
                           prompt,
-                          max_output_tokens=64,
+                          max_output_tokens=80,
                       ):
                           text += text_from_chunk(chunk)
                       if not text.strip():
                           raise RuntimeError(f"Empty neural response for prompt: {prompt}")
                       outputs.append(text.strip())
 
-          print("FIRST:", outputs[0])
-          print("SECOND:", outputs[1])
+          print("FIRST RESPONSE LENGTH:", len(outputs[0]))
+          print("SECOND RESPONSE LENGTH:", len(outputs[1]))
           PY

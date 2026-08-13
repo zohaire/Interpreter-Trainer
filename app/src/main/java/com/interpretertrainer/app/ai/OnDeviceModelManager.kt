@@ -183,6 +183,9 @@ object OnDeviceModelManager {
                 connection.disconnect()
             }
         }
+
+        @Suppress("UNREACHABLE_CODE")
+        error("Model download loop exited unexpectedly.")
     }
 
     private fun finalizeDownloadedModel(

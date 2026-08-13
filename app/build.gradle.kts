@@ -8,6 +8,10 @@ plugins {
 }
 
 val ciDebugKeystorePath = providers.environmentVariable("INTERPRETER_DEBUG_KEYSTORE").orNull
+val interpreterAiBaseUrl = providers.environmentVariable("INTERPRETER_AI_BASE_URL").orNull.orEmpty()
+val escapedInterpreterAiBaseUrl = interpreterAiBaseUrl
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
 
 android {
     namespace = "com.interpretertrainer.app"
@@ -17,10 +21,16 @@ android {
         applicationId = "com.interpretertrainer.app"
         minSdk = 31
         targetSdk = 36
-        // GitHub Actions supplies its monotonically increasing run number so each test APK can
-        // install cleanly over the previous stable-signed APK without forcing an uninstall.
-        versionCode = providers.environmentVariable("INTERPRETER_VERSION_CODE").orNull?.toIntOrNull() ?: 4
-        versionName = "0.4.0"
+        versionCode = providers.environmentVariable("INTERPRETER_VERSION_CODE").orNull?.toIntOrNull() ?: 5
+        versionName = "0.5.0"
+
+        // This is a public HTTPS URL only. Provider credentials stay on the hosted backend and are
+        // never embedded in the Android application.
+        buildConfigField(
+            "String",
+            "INTERPRETER_AI_BASE_URL",
+            "\"$escapedInterpreterAiBaseUrl\""
+        )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -28,9 +38,6 @@ android {
 
     signingConfigs {
         getByName("debug") {
-            // Hosted CI machines normally generate a fresh debug certificate. Explicitly point the
-            // debug build at our development-only key so APKs from different workflow runs are
-            // update-compatible and preserve app-private data such as the downloaded AI model.
             if (!ciDebugKeystorePath.isNullOrBlank()) {
                 storeFile = file(ciDebugKeystorePath)
                 storePassword = "android"
@@ -83,9 +90,6 @@ dependencies {
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
-    // Production Android runtime for on-device open-weight language models.
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.14.0")
-
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.4")
@@ -99,7 +103,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    // LiteRT-LM 0.14.0 is built against coroutines 1.11.0.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     implementation("androidx.room:room-runtime:2.8.4")

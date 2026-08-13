@@ -93,7 +93,7 @@ object OnDeviceModelManager {
                 if (response == HTTP_RANGE_NOT_SATISFIABLE && existing > 0L) {
                     val remoteTotal = parseRemoteTotal(connection.getHeaderField("Content-Range"))
 
-                    // RFC 7233 uses `Content-Range: bytes */<length>` for a 416 response. If our
+                    // A 416 response reports the remote object length in Content-Range. If our
                     // local partial file exactly matches that length, the transfer is already done.
                     if (remoteTotal != null && existing == remoteTotal && existing >= MIN_EXPECTED_BYTES) {
                         return@withContext finalizeDownloadedModel(
@@ -209,7 +209,8 @@ object OnDeviceModelManager {
         return finalFile
     }
 
-    /** Returns the total object length from either `bytes start-end/total` or `bytes */total`. */
+    // Returns the total object length from a Content-Range response, including an unsatisfied
+    // range response where the header contains an asterisk instead of a start/end pair.
     private fun parseRemoteTotal(contentRange: String?): Long? {
         if (contentRange.isNullOrBlank()) return null
         val slash = contentRange.lastIndexOf('/')

@@ -39,7 +39,7 @@ fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
 
     SideEffect {
-        bridge.practiceContext = buildPracticeContext(sessions)
+        bridge.contextValue = buildPracticeContext(sessions)
     }
 
     DisposableEffect(Unit) {
@@ -70,10 +70,10 @@ fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
 
 private class PracticeContextBridge {
     @Volatile
-    var practiceContext: String = "No saved practice sessions yet."
+    var contextValue: String = "No saved practice sessions yet."
 
     @JavascriptInterface
-    fun getPracticeContext(): String = practiceContext
+    fun getPracticeContext(): String = contextValue
 }
 
 @SuppressLint("SetJavaScriptEnabled")

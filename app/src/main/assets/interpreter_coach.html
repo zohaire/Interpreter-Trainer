@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <script src="https://js.puter.com/v2/"></script>
+  <style>
+    :root {
+      --bg:#f7f7fb; --card:#ffffff; --text:#202124; --muted:#666974;
+      --accent:#3138b8; --accent2:#ebeaff; --border:#dedee8; --user:#eeedff;
+      --danger:#b3261e; --ok:#236b3c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg:#101116; --card:#1b1b21; --text:#f2f0f7; --muted:#c5c1cd;
+        --accent:#aeb3ff; --accent2:#4a465b; --border:#3b3a43; --user:#252733;
+        --danger:#ffb4ab; --ok:#9bd4aa;
+      }
+    }
+    * { box-sizing:border-box; }
+    html, body { margin:0; min-height:100%; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Roboto,sans-serif; }
+    body { padding:16px; }
+    .shell { max-width:900px; margin:0 auto; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:20px; padding:18px; margin-bottom:14px; }
+    .title { font-size:19px; font-weight:750; margin:0 0 6px; }
+    .sub { color:var(--muted); line-height:1.45; }
+    .status { display:flex; gap:12px; align-items:flex-start; }
+    .dot { width:12px; height:12px; border-radius:50%; margin-top:6px; background:var(--muted); flex:0 0 auto; }
+    .dot.ok { background:var(--ok); }
+    .dot.bad { background:var(--danger); }
+    .tabs { display:flex; gap:8px; margin:8px 0 14px; }
+    button { border:1px solid var(--border); border-radius:14px; padding:11px 15px; font:inherit; font-weight:650; background:var(--card); color:var(--text); cursor:pointer; }
+    button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+    @media (prefers-color-scheme: dark) { button.primary { color:#101116; } }
+    button.active { background:var(--accent2); border-color:var(--accent); }
+    button:disabled { opacity:.55; cursor:default; }
+    .pane { display:none; }
+    .pane.active { display:block; }
+    .messages { display:flex; flex-direction:column; gap:12px; min-height:280px; max-height:55vh; overflow:auto; padding:2px; }
+    .label { font-size:12px; color:var(--muted); margin:0 0 5px 3px; font-weight:700; }
+    .bubble { padding:14px 15px; border-radius:17px; background:var(--card); border:1px solid var(--border); line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .bubble.user { background:var(--user); }
+    .composer { margin-top:12px; display:grid; grid-template-columns:1fr auto; gap:8px; align-items:end; }
+    textarea, input, select { width:100%; border:1px solid var(--border); background:var(--card); color:var(--text); border-radius:13px; padding:12px; font:inherit; outline:none; }
+    textarea:focus, input:focus, select:focus { border-color:var(--accent); }
+    textarea { resize:vertical; min-height:92px; }
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .field { margin-bottom:10px; }
+    .field label { display:block; font-size:13px; font-weight:700; margin:0 0 6px 2px; }
+    .notice { padding:11px 13px; border-radius:13px; background:var(--accent2); line-height:1.45; margin-top:10px; }
+    .error { color:var(--danger); }
+    .loading { color:var(--muted); font-style:italic; }
+    .small { font-size:12px; color:var(--muted); line-height:1.45; }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    @media (max-width:620px) { .grid2 { grid-template-columns:1fr; } .composer { grid-template-columns:1fr; } .composer button { width:100%; } }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="card">
+    <div class="status">
+      <div id="statusDot" class="dot"></div>
+      <div>
+        <div class="title">Interpreter AI · online</div>
+        <div id="statusText" class="sub">Loading the online AI service…</div>
+        <div class="small" style="margin-top:8px">Qwen runs online. No 400–500 MB model package is installed on your phone.</div>
+        <div class="actions">
+          <button id="connectBtn" onclick="connectAi()">Connect Interpreter AI</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button id="chatTab" class="active" onclick="showPane('chat')">Chat</button>
+    <button id="evalTab" onclick="showPane('evaluate')">Evaluate</button>
+  </div>
+
+  <section id="chatPane" class="pane active">
+    <div class="messages" id="messages"></div>
+    <div id="chatError" class="error"></div>
+    <div class="composer">
+      <textarea id="chatInput" placeholder="Ask Interpreter AI about interpreting, your saved practice, terminology, memory, delivery…"></textarea>
+      <button id="sendBtn" class="primary" onclick="sendChat()">Send</button>
+    </div>
+  </section>
+
+  <section id="evaluatePane" class="pane">
+    <div class="card">
+      <div class="title">AI performance evaluation</div>
+      <div class="sub">Paste the source and what you interpreted. Qwen will compare them and give targeted interpreter-training feedback.</div>
+      <div class="grid2" style="margin-top:14px">
+        <div class="field"><label>Practice mode</label><select id="mode"><option>Shadowing</option><option>Consecutive Interpretation</option><option>Sight Translation</option></select></div>
+        <div class="field"><label>Language direction</label><input id="languages" placeholder="e.g. English → Arabic" /></div>
+      </div>
+      <div class="field"><label>Source transcript</label><textarea id="sourceText" placeholder="Original speech or source text"></textarea></div>
+      <div class="field"><label>Your interpretation / transcript</label><textarea id="traineeText" placeholder="What you said or produced"></textarea></div>
+      <div class="grid2">
+        <div class="field"><label>Source duration, seconds (optional)</label><input id="sourceSeconds" inputmode="decimal" placeholder="60" /></div>
+        <div class="field"><label>Your duration, seconds (optional)</label><input id="traineeSeconds" inputmode="decimal" placeholder="64" /></div>
+      </div>
+      <button id="evaluateBtn" class="primary" onclick="evaluatePerformance()">Evaluate with Interpreter AI</button>
+      <div class="notice small">For cross-language interpreting, the AI can analyze meaning and reformulation, but feedback is still advisory. Numbers, names and obvious omissions should be checked against the source.</div>
+    </div>
+    <div id="evaluationResult"></div>
+  </section>
+</div>
+
+<script>
+  const CHAT_MODEL = 'qwen/qwen3.7-flash';
+  const EVALUATION_MODEL = 'qwen/qwen3.8-max';
+  const history = [];
+  let busy = false;
+
+  function nativePracticeContext() {
+    try { return window.InterpreterNative?.getPracticeContext?.() || 'No saved practice context.'; }
+    catch (_) { return 'No saved practice context.'; }
+  }
+
+  function setStatus(text, state='idle') {
+    document.getElementById('statusText').textContent = text;
+    const dot = document.getElementById('statusDot');
+    dot.className = 'dot' + (state === 'ok' ? ' ok' : state === 'bad' ? ' bad' : '');
+  }
+
+  function showPane(name) {
+    const chat = name === 'chat';
+    document.getElementById('chatPane').classList.toggle('active', chat);
+    document.getElementById('evaluatePane').classList.toggle('active', !chat);
+    document.getElementById('chatTab').classList.toggle('active', chat);
+    document.getElementById('evalTab').classList.toggle('active', !chat);
+  }
+
+  function addMessage(role, text) {
+    const wrap = document.createElement('div');
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = role === 'user' ? 'You' : 'Interpreter AI · Qwen';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble' + (role === 'user' ? ' user' : '');
+    bubble.textContent = text;
+    wrap.appendChild(label); wrap.appendChild(bubble);
+    const messages = document.getElementById('messages');
+    messages.appendChild(wrap);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function responseText(response) {
+    if (typeof response === 'string') return response.trim();
+    const content = response?.message?.content;
+    if (typeof content === 'string') return content.trim();
+    if (Array.isArray(content)) {
+      return content.map(part => typeof part === 'string' ? part : (part?.text || '')).join('').trim();
+    }
+    if (typeof response?.text === 'string') return response.text.trim();
+    return '';
+  }
+
+  async function connectAi() {
+    if (!window.puter) {
+      setStatus('The online AI library could not load. Check your internet connection and try again.', 'bad');
+      return false;
+    }
+    try {
+      if (!puter.auth.isSignedIn()) {
+        setStatus('Connecting to Interpreter AI…');
+        await puter.auth.signIn({ attempt_temp_user_creation: true });
+      }
+      setStatus('Connected. Interpreter AI is ready.', 'ok');
+      document.getElementById('connectBtn').textContent = 'AI connected';
+      return true;
+    } catch (error) {
+      const message = error?.msg || error?.message || String(error);
+      setStatus('Could not connect: ' + message, 'bad');
+      return false;
+    }
+  }
+
+  async function ensureConnected() {
+    if (window.puter && puter.auth.isSignedIn()) return true;
+    return await connectAi();
+  }
+
+  async function sendChat() {
+    if (busy) return;
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text) return;
+    document.getElementById('chatError').textContent = '';
+    addMessage('user', text);
+    input.value = '';
+
+    if (!(await ensureConnected())) {
+      document.getElementById('chatError').textContent = 'Interpreter AI is not connected yet.';
+      return;
+    }
+
+    busy = true;
+    document.getElementById('sendBtn').disabled = true;
+    const loadingId = 'loading-' + Date.now();
+    const loading = document.createElement('div'); loading.id = loadingId; loading.className = 'loading'; loading.textContent = 'Interpreter AI is thinking…';
+    document.getElementById('messages').appendChild(loading);
+
+    try {
+      const system = `You are Interpreter AI, a specialized coach for professional interpreters and interpreter students. Help with shadowing, consecutive interpreting, sight translation, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. Reply naturally in the user's language, especially English, French or Arabic. Be practical and specific. Never invent a user's score, transcript or improvement trend. Use saved practice context only when it actually supports the answer.\n\nSaved practice context:\n${nativePracticeContext()}`;
+      const messages = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
+      const response = await puter.ai.chat(messages, { model: CHAT_MODEL, max_tokens: 700, temperature: 0.25 });
+      const answer = responseText(response);
+      if (!answer) throw new Error('The AI returned an empty response.');
+      history.push({ role:'user', content:text }, { role:'assistant', content:answer });
+      document.getElementById(loadingId)?.remove();
+      addMessage('assistant', answer);
+      setStatus('Connected. Interpreter AI is ready.', 'ok');
+    } catch (error) {
+      document.getElementById(loadingId)?.remove();
+      const message = error?.msg || error?.message || String(error);
+      document.getElementById('chatError').textContent = 'AI request failed: ' + message;
+    } finally {
+      busy = false;
+      document.getElementById('sendBtn').disabled = false;
+    }
+  }
+
+  async function evaluatePerformance() {
+    if (busy) return;
+    const source = document.getElementById('sourceText').value.trim();
+    const trainee = document.getElementById('traineeText').value.trim();
+    if (!source || !trainee) {
+      document.getElementById('evaluationResult').innerHTML = '<div class="card error">Paste both the source transcript and your interpretation first.</div>';
+      return;
+    }
+    if (!(await ensureConnected())) return;
+
+    busy = true;
+    document.getElementById('evaluateBtn').disabled = true;
+    document.getElementById('evaluationResult').innerHTML = '<div class="card loading">Interpreter AI is evaluating the performance…</div>';
+
+    const mode = document.getElementById('mode').value;
+    const languages = document.getElementById('languages').value.trim() || 'not specified';
+    const sourceSeconds = document.getElementById('sourceSeconds').value.trim() || 'not provided';
+    const traineeSeconds = document.getElementById('traineeSeconds').value.trim() || 'not provided';
+
+    const system = `You are a rigorous interpreter-performance evaluator. Assess meaning transfer, omissions, additions, numbers, names, terminology, reformulation, register, fluency and delivery where the evidence allows it. Distinguish clear evidence from uncertainty. Do not invent facts. If source and target languages differ, compare meaning rather than word overlap. Give concrete exercises. Reply in the user's likely language.`;
+    const prompt = `Practice mode: ${mode}\nLanguage direction: ${languages}\nSource duration: ${sourceSeconds} seconds\nTrainee duration: ${traineeSeconds} seconds\n\nSOURCE:\n${source}\n\nTRAINEE PERFORMANCE:\n${trainee}\n\nProvide: (1) concise overall assessment, (2) strengths, (3) important omissions/distortions/additions with examples, (4) numbers/names/terminology issues, (5) delivery/timing comments if evidence exists, and (6) three specific drills for the next practice. Do not assign a numeric score unless the evidence is sufficient to justify one.`;
+
+    try {
+      const response = await puter.ai.chat([
+        { role:'system', content:system },
+        { role:'user', content:prompt }
+      ], { model: EVALUATION_MODEL, max_tokens: 1300, temperature: 0.15 });
+      const answer = responseText(response);
+      if (!answer) throw new Error('The AI returned an empty evaluation.');
+      const card = document.createElement('div'); card.className = 'card';
+      const title = document.createElement('div'); title.className = 'title'; title.textContent = 'Interpreter AI evaluation';
+      const body = document.createElement('div'); body.className = 'bubble'; body.textContent = answer;
+      card.appendChild(title); card.appendChild(body);
+      const result = document.getElementById('evaluationResult'); result.innerHTML = ''; result.appendChild(card);
+      setStatus('Connected. Interpreter AI is ready.', 'ok');
+    } catch (error) {
+      const message = error?.msg || error?.message || String(error);
+      document.getElementById('evaluationResult').innerHTML = '<div class="card error">AI evaluation failed: ' + escapeHtml(message) + '</div>';
+    } finally {
+      busy = false;
+      document.getElementById('evaluateBtn').disabled = false;
+    }
+  }
+
+  function escapeHtml(value) {
+    const div = document.createElement('div'); div.textContent = value; return div.innerHTML;
+  }
+
+  document.getElementById('chatInput').addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendChat(); }
+  });
+
+  window.addEventListener('load', () => {
+    addMessage('assistant', 'Hi. I’m Interpreter AI. Ask me about interpreting technique or your saved practice, or open Evaluate to review a performance.');
+    if (!window.puter) setStatus('The online AI library could not load. Check your connection.', 'bad');
+    else if (puter.auth.isSignedIn()) setStatus('Connected. Interpreter AI is ready.', 'ok');
+    else setStatus('Ready. Tap Connect Interpreter AI or simply send your first message.');
+  });
+</script>
+</body>
+</html>

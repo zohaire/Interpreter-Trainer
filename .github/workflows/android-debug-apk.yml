@@ -8,6 +8,81 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
+  puter-ai-browser-test:
+    name: Verify live Qwen catalog and auth flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify live Puter model catalog contains our Qwen models
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --location --fail --silent --show-error --max-time 45 \
+            https://api.puter.com/puterai/chat/models/details \
+            --output /tmp/puter-models.json
+          test -s /tmp/puter-models.json
+          grep -q 'qwen/qwen3.7-flash' /tmp/puter-models.json
+          grep -q 'qwen/qwen3.8-max' /tmp/puter-models.json
+          echo "Both Interpreter AI Qwen models are present in Puter's live catalog."
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install headless Chromium
+        working-directory: /tmp
+        run: |
+          mkdir -p /tmp/puter-ci
+          cd /tmp/puter-ci
+          npm init -y >/dev/null
+          npm install --silent playwright@1.55.0
+          npx playwright install chromium
+
+      - name: Verify Puter SDK loads and opens official authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/puter-ci/index.html <<'HTML'
+          <!doctype html><html><body>
+          <script src="https://js.puter.com/v2/"></script>
+          <button id="run" onclick="puter.auth.signIn({ attempt_temp_user_creation: true })">Connect</button>
+          </body></html>
+          HTML
+
+          python3 -m http.server 8765 --directory /tmp/puter-ci >/tmp/puter-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+
+          cat > /tmp/puter-ci/test.cjs <<'NODE'
+          const { chromium } = require('playwright');
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext();
+            const page = await context.newPage();
+            await page.goto('http://127.0.0.1:8765', { waitUntil: 'networkidle', timeout: 60000 });
+            const sdkReady = await page.evaluate(() => Boolean(window.puter?.auth?.signIn && window.puter?.ai?.chat));
+            if (!sdkReady) throw new Error('Puter.js AI/auth SDK did not load.');
+
+            const popupPromise = page.waitForEvent('popup', { timeout: 30000 });
+            await page.click('#run');
+            const popup = await popupPromise;
+            await popup.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+            const url = popup.url();
+            console.log('AUTH POPUP:', url);
+            if (!url.startsWith('https://puter.com/action/sign-in')) {
+              throw new Error(`Unexpected authentication URL: ${url}`);
+            }
+            if (!url.includes('attempt_temp_user_creation=true')) {
+              throw new Error('Temporary-user onboarding flag is missing from auth flow.');
+            }
+            await browser.close();
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
+
+          cd /tmp/puter-ci
+          node test.cjs
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -36,22 +111,24 @@ jobs:
             -storepass android -alias androiddebugkey >/dev/null
           echo "Stable Interpreter Trainer development signing key installed."
 
-      - name: Guard neural one-shot conversation architecture
+      - name: Guard online Interpreter AI architecture
         shell: bash
         run: |
           set -euo pipefail
-          AI_FILE="app/src/main/java/com/interpretertrainer/app/ai/OnDeviceInterpreterAi.kt"
-          if grep -q "Runtime health check" "$AI_FILE"; then
-            echo "A hidden sendMessage health probe would consume a real conversation turn."
+          test -f app/src/main/assets/interpreter_coach.html
+          test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnDeviceInterpreterAi.kt
+          test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnDeviceModelManager.kt
+          test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnlineInterpreterAi.kt
+          if grep -R -E "litertlm|LiteRT-LM|Install Interpreter AI|MODEL_DOWNLOAD_SIZE_LABEL|INTERPRETER_AI_BASE_URL" \
+              app/src/main app/build.gradle.kts; then
+            echo "Old local-model or placeholder-backend AI code must not return."
             exit 1
           fi
-          if grep -Eq "private var conversation|var conversation: Conversation" "$AI_FILE"; then
-            echo "Do not keep a native LiteRT Conversation across user messages for this Qwen3 model."
-            exit 1
-          fi
-          grep -q "private suspend fun sendOneShot" "$AI_FILE"
-          grep -q "currentEngine.createConversation" "$AI_FILE"
-          grep -q "sendMessageAsync" "$AI_FILE"
+          grep -q "https://js.puter.com/v2/" app/src/main/assets/interpreter_coach.html
+          grep -q "qwen/qwen3.7-flash" app/src/main/assets/interpreter_coach.html
+          grep -q "qwen/qwen3.8-max" app/src/main/assets/interpreter_coach.html
+          grep -q "attempt_temp_user_creation" app/src/main/assets/interpreter_coach.html
+          grep -q "CoachChromeClient" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
 
       - name: Build debug APK
         env:
@@ -91,83 +168,3 @@ jobs:
           name: interpreter-trainer-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-
-  neural-model-smoke-test:
-    name: Load and run Interpreter AI model
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install the same LiteRT-LM release used by Android
-        run: python -m pip install --upgrade "litert-lm==0.14.0"
-
-      - name: Download the exact Qwen model with retry/backoff
-        shell: bash
-        env:
-          MODEL_URL: https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/qwen3_0_6b_mixed_int4.litertlm?download=true
-          MODEL_PATH: /tmp/qwen3_0_6b_mixed_int4.litertlm
-        run: |
-          set -euo pipefail
-          curl --location --fail --show-error \
-            --retry 12 --retry-all-errors --retry-delay 15 \
-            --connect-timeout 30 --max-time 1200 \
-            --user-agent "InterpreterTrainer-CI/1.0" \
-            --output "$MODEL_PATH" "$MODEL_URL"
-          test "$(stat -c%s "$MODEL_PATH")" -gt 450000000
-
-      - name: Generate two turns with one fresh conversation per message
-        shell: bash
-        run: |
-          set -euo pipefail
-          timeout 15m python - <<'PY'
-          import litert_lm
-
-          model_path = "/tmp/qwen3_0_6b_mixed_int4.litertlm"
-
-          def text_from_chunk(chunk):
-              parts = []
-              for item in chunk.get("content", []) or []:
-                  if isinstance(item, dict) and item.get("type") == "text":
-                      parts.append(item.get("text", ""))
-              for value in (chunk.get("channels", {}) or {}).values():
-                  if isinstance(value, str):
-                      parts.append(value)
-              return "".join(parts)
-
-          prompts = [
-              "Reply in one short sentence confirming message one works.",
-              "Recent chat context: User asked whether message one worked. Coach confirmed it. Now reply in one short sentence confirming message two works.",
-          ]
-          outputs = []
-
-          with litert_lm.Engine(
-              model_path,
-              backend=litert_lm.Backend.CPU(),
-              max_num_tokens=1280,
-          ) as engine:
-              for prompt in prompts:
-                  # Deliberately create a new native Conversation for every user message while
-                  # reusing the already-loaded Engine. This mirrors the Android workaround for
-                  # Qwen3/LiteRT-LM 0.14.0's turn-two incremental prompt-prefix failure.
-                  with engine.create_conversation(
-                      system_message="You are a concise interpreter coach.",
-                      extra_context={"enable_thinking": False},
-                      max_output_tokens=80,
-                  ) as conversation:
-                      text = ""
-                      for chunk in conversation.send_message_async(
-                          prompt,
-                          max_output_tokens=80,
-                      ):
-                          text += text_from_chunk(chunk)
-                      if not text.strip():
-                          raise RuntimeError(f"Empty neural response for prompt: {prompt}")
-                      outputs.append(text.strip())
-
-          print("FIRST RESPONSE LENGTH:", len(outputs[0]))
-          print("SECOND RESPONSE LENGTH:", len(outputs[1]))
-          PY

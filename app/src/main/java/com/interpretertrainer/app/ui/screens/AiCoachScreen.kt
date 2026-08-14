@@ -1,617 +1,197 @@
 package com.interpretertrainer.app.ui.screens
 
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
+import android.annotation.SuppressLint
+import android.app.Dialog
+import android.content.Context
+import android.os.Message
+import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import com.interpretertrainer.app.ai.LocalInterpreterChatbot
-import com.interpretertrainer.app.ai.LocalInterpreterCoach
-import com.interpretertrainer.app.ai.OnDeviceInterpreterAi
-import com.interpretertrainer.app.ai.OnDeviceModelManager
+import androidx.compose.ui.viewinterop.AndroidView
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
-import com.interpretertrainer.app.model.LanguageOption
-import com.interpretertrainer.app.model.PracticeMode
 import com.interpretertrainer.app.viewmodel.SessionViewModel
-import kotlinx.coroutines.launch
+import java.util.Locale
 
-private data class CoachChatMessage(
-    val fromUser: Boolean,
-    val text: String,
-    val neural: Boolean = false,
-    val suggestions: List<String> = emptyList()
-)
-
+/**
+ * Interpreter Coach uses an online Qwen model through Puter.js.
+ *
+ * There are no on-device model weights, model downloads, provider API keys, or private backend
+ * endpoints in the APK. Puter handles browser authentication and AI access for each user.
+ */
 @Composable
 fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
-    val context = LocalContext.current
     val sessions by sessionViewModel.sessions.collectAsState()
-    val neuralAi = remember { OnDeviceInterpreterAi(context) }
-    val scope = rememberCoroutineScope()
+    val bridge = remember { PracticeContextBridge() }
+    val webViewRef = remember { mutableStateOf<WebView?>(null) }
 
-    var section by rememberSaveable { mutableStateOf("CHAT") }
-    var modelInstalled by remember { mutableStateOf(OnDeviceModelManager.isInstalled(context)) }
-    var aiReady by remember { mutableStateOf(false) }
-    var modelBusy by remember { mutableStateOf(false) }
-    var downloading by remember { mutableStateOf(false) }
-    var downloadedBytes by remember { mutableLongStateOf(OnDeviceModelManager.installedBytes(context)) }
-    var totalBytes by remember { mutableLongStateOf(0L) }
-    var modelError by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        if (modelInstalled) {
-            modelBusy = true
-            neuralAi.ensureLoaded()
-                .onSuccess {
-                    aiReady = true
-                    modelError = null
-                }
-                .onFailure {
-                    aiReady = false
-                    modelError = it.message ?: "Could not load the neural AI model."
-                }
-            modelBusy = false
-        }
+    SideEffect {
+        bridge.contextValue = buildPracticeContext(sessions)
     }
 
-    fun installModel() {
-        if (modelBusy) return
-        modelBusy = true
-        downloading = true
-        modelError = null
-        downloadedBytes = 0L
-        totalBytes = 0L
-
-        scope.launch {
-            try {
-                OnDeviceModelManager.download(context) { downloaded, total ->
-                    scope.launch {
-                        downloadedBytes = downloaded
-                        totalBytes = total
-                    }
-                }
-                modelInstalled = true
-                downloading = false
-                neuralAi.ensureLoaded().getOrThrow()
-                aiReady = true
-                modelError = null
-            } catch (t: Throwable) {
-                aiReady = false
-                modelInstalled = OnDeviceModelManager.isInstalled(context)
-                modelError = t.message ?: "Interpreter AI installation failed."
-            } finally {
-                downloading = false
-                modelBusy = false
+    DisposableEffect(Unit) {
+        onDispose {
+            webViewRef.value?.let { webView ->
+                runCatching { webView.stopLoading() }
+                runCatching { webView.removeJavascriptInterface("InterpreterNative") }
+                runCatching { webView.destroy() }
             }
+            webViewRef.value = null
         }
     }
 
     TrainerScaffold("Interpreter Coach", onBack) { padding ->
-        Column(
+        AndroidView(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            SectionCard {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(
-                        if (aiReady) Icons.Default.CheckCircle else Icons.Default.Memory,
-                        contentDescription = null
-                    )
-                    Column(Modifier.weight(1f)) {
-                        Text("Neural Interpreter AI", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            when {
-                                aiReady -> "${OnDeviceModelManager.MODEL_LABEL} is loaded on this phone. Chat is generated by the neural model, not the basic rule-based coach."
-                                downloading -> "Downloading the neural model once. After installation it runs locally without a server."
-                                modelInstalled -> "The neural model is installed and is being prepared for local inference."
-                                else -> "Install the real open-weight chatbot once. The model is stored privately on this phone and then works offline."
-                            },
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text(
-                        if (aiReady) "On-device • offline • no server • no API key" else "Qwen open-weight model • ${OnDeviceModelManager.MODEL_DOWNLOAD_SIZE_LABEL} one-time download",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-
-                if (downloading) {
-                    if (totalBytes > 0L) {
-                        val progress = (downloadedBytes.toDouble() / totalBytes.toDouble()).toFloat().coerceIn(0f, 1f)
-                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                        Text(
-                            "${formatModelBytes(downloadedBytes)} / ${formatModelBytes(totalBytes)} • ${(progress * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    } else {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Text("Downloaded ${formatModelBytes(downloadedBytes)}", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-
-                if (!aiReady && !modelInstalled && !modelBusy) {
-                    Button(onClick = { installModel() }) {
-                        Icon(Icons.Default.Download, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Install Interpreter AI")
-                    }
-                }
-
-                if (modelBusy && !downloading) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text("Loading neural model…")
-                    }
-                }
-
-                modelError?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error)
-                    if (!modelBusy) {
-                        OutlinedButton(onClick = { installModel() }) { Text("Try again") }
-                    }
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = section == "CHAT",
-                    onClick = { section = "CHAT" },
-                    label = { Text("Chat") }
-                )
-                FilterChip(
-                    selected = section == "EVALUATE",
-                    onClick = { section = "EVALUATE" },
-                    label = { Text("Evaluate") }
-                )
-            }
-
-            Box(Modifier.fillMaxWidth().weight(1f)) {
-                if (section == "CHAT") {
-                    InterpreterChatPane(
-                        sessions = sessions,
-                        neuralAi = neuralAi,
-                        aiReady = aiReady
-                    )
-                } else {
-                    InterpreterEvaluationPane(
-                        neuralAi = neuralAi,
-                        aiReady = aiReady
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun InterpreterChatPane(
-    sessions: List<PracticeSessionEntity>,
-    neuralAi: OnDeviceInterpreterAi,
-    aiReady: Boolean
-) {
-    val scope = rememberCoroutineScope()
-    val initial = remember { LocalInterpreterChatbot.reply("hello", emptyList()) }
-    val messages = remember {
-        mutableStateListOf(
-            CoachChatMessage(
-                fromUser = false,
-                text = "${initial.text}\n\nInstall the neural model above for genuinely open-ended AI conversation. Until then, messages are answered by the clearly labeled Basic coach.",
-                neural = false,
-                suggestions = initial.suggestedPrompts
-            )
-        )
-    }
-    var input by rememberSaveable { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
-    var readyAnnounced by remember { mutableStateOf(false) }
-    val listState = rememberLazyListState()
-
-    LaunchedEffect(aiReady) {
-        if (aiReady && !readyAnnounced) {
-            readyAnnounced = true
-            messages += CoachChatMessage(
-                fromUser = false,
-                neural = true,
-                text = "Neural Interpreter AI is ready. Ask me freely about interpreting, your saved practice, weaknesses, training plans, terminology, or how to improve a performance."
-            )
-        }
-    }
-
-    fun sendMessage(value: String) {
-        val clean = value.trim()
-        if (clean.isBlank() || loading) return
-        messages += CoachChatMessage(fromUser = true, text = clean)
-        input = ""
-
-        if (!aiReady) {
-            val reply = LocalInterpreterChatbot.reply(clean, sessions)
-            messages += CoachChatMessage(
-                fromUser = false,
-                text = reply.text,
-                neural = false,
-                suggestions = reply.suggestedPrompts
-            )
-            return
-        }
-
-        loading = true
-        scope.launch {
-            neuralAi.chat(clean, sessions)
-                .onSuccess { answer ->
-                    messages += CoachChatMessage(
-                        fromUser = false,
-                        text = answer,
-                        neural = true
-                    )
-                }
-                .onFailure { failure ->
-                    messages += CoachChatMessage(
-                        fromUser = false,
-                        neural = true,
-                        text = "Neural AI error: ${failure.message ?: "generation failed"}. I did not silently replace this answer with the basic coach."
-                    )
-                }
-            loading = false
-        }
-    }
-
-    LaunchedEffect(messages.size, loading) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
-    }
-
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (!aiReady) {
-            Surface(
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.secondaryContainer
-            ) {
-                Text(
-                    "Basic coach active — this is not the neural chatbot yet. Install Interpreter AI above to switch to generated responses.",
-                    modifier = Modifier.padding(12.dp),
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-            }
-        }
-
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxWidth().weight(1f),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(bottom = 8.dp)
-        ) {
-            items(messages) { message ->
-                Column(Modifier.fillMaxWidth()) {
-                    Text(
-                        when {
-                            message.fromUser -> "You"
-                            message.neural -> "Interpreter AI • neural"
-                            else -> "Basic coach • rule-based"
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.medium,
-                        tonalElevation = if (message.fromUser) 3.dp else 1.dp
-                    ) {
-                        Text(message.text, modifier = Modifier.padding(14.dp))
-                    }
-
-                    if (!message.fromUser && !message.neural && message.suggestions.isNotEmpty()) {
-                        Spacer(Modifier.height(7.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            message.suggestions.forEach { suggestion ->
-                                AssistChip(
-                                    onClick = { sendMessage(suggestion) },
-                                    label = { Text(suggestion) }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (loading) {
-                item {
-                    Surface(shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(14.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            Text("Neural Interpreter AI is generating…")
-                        }
-                    }
-                }
-            }
-        }
-
-        OutlinedTextField(
-            value = input,
-            onValueChange = { input = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(if (aiReady) "Ask Neural Interpreter AI" else "Ask Basic coach") },
-            placeholder = { Text("e.g. Why am I losing numbers in consecutive interpreting?") },
-            minLines = 2,
-            maxLines = 4,
-            enabled = !loading,
-            trailingIcon = {
-                IconButton(onClick = { sendMessage(input) }, enabled = input.isNotBlank() && !loading) {
-                    Icon(Icons.Default.Send, contentDescription = "Send")
-                }
+                .padding(padding),
+            factory = { context ->
+                createCoachWebView(context, bridge).also { webViewRef.value = it }
+            },
+            update = { webView ->
+                CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
             }
         )
     }
 }
 
-@Composable
-private fun InterpreterEvaluationPane(
-    neuralAi: OnDeviceInterpreterAi,
-    aiReady: Boolean
-) {
-    val scope = rememberCoroutineScope()
-    var mode by rememberSaveable { mutableStateOf(PracticeMode.SHADOWING) }
-    var sourceLanguage by rememberSaveable { mutableStateOf(LanguageOption.ENGLISH_US) }
-    var targetLanguage by rememberSaveable { mutableStateOf(LanguageOption.ENGLISH_US) }
-    var sourceText by rememberSaveable { mutableStateOf("") }
-    var traineeText by rememberSaveable { mutableStateOf("") }
-    var sourceDurationSeconds by rememberSaveable { mutableStateOf("") }
-    var traineeDurationSeconds by rememberSaveable { mutableStateOf("") }
-    var report by remember { mutableStateOf<LocalInterpreterCoach.Report?>(null) }
-    var neuralExplanation by rememberSaveable { mutableStateOf("") }
-    var neuralError by rememberSaveable { mutableStateOf<String?>(null) }
-    var neuralLoading by remember { mutableStateOf(false) }
+private class PracticeContextBridge {
+    @Volatile
+    var contextValue: String = "No saved practice sessions yet."
 
-    fun clearAiExplanation() {
-        neuralExplanation = ""
-        neuralError = null
+    @JavascriptInterface
+    fun getPracticeContext(): String = contextValue
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+private fun createCoachWebView(context: Context, bridge: PracticeContextBridge): WebView {
+    val html = context.assets.open("interpreter_coach.html")
+        .bufferedReader(Charsets.UTF_8)
+        .use { it.readText() }
+
+    val webView = WebView(context)
+    webView.layoutParams = ViewGroup.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT
+    )
+    configureCoachWebView(webView)
+    webView.addJavascriptInterface(bridge, "InterpreterNative")
+    webView.webViewClient = WebViewClient()
+    webView.webChromeClient = CoachChromeClient(context)
+
+    CookieManager.getInstance().apply {
+        setAcceptCookie(true)
+        setAcceptThirdPartyCookies(webView, true)
     }
 
-    fun analyze() {
-        val sourceMs = sourceDurationSeconds.toDoubleOrNull()?.takeIf { it > 0 }?.times(1000)?.toLong()
-        val traineeMs = traineeDurationSeconds.toDoubleOrNull()?.takeIf { it > 0 }?.times(1000)?.toLong()
-        report = LocalInterpreterCoach.analyze(
-            mode = mode,
-            sourceText = sourceText,
-            traineeText = traineeText,
-            sourceLanguage = sourceLanguage.tag,
-            targetLanguage = targetLanguage.tag,
-            sourceDurationMillis = sourceMs,
-            traineeDurationMillis = traineeMs
-        )
-        clearAiExplanation()
-    }
+    // A stable HTTPS origin gives Puter.js normal browser auth/cookie semantics while the page
+    // itself remains bundled with the APK.
+    webView.loadDataWithBaseURL(
+        "https://interpreter-trainer.app/",
+        html,
+        "text/html",
+        "UTF-8",
+        null
+    )
+    return webView
+}
 
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text("Practice mode", style = MaterialTheme.typography.titleMedium)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(
-                PracticeMode.SHADOWING,
-                PracticeMode.CONSECUTIVE,
-                PracticeMode.SIGHT_TRANSLATION
-            ).forEach { option ->
-                FilterChip(
-                    selected = mode == option,
-                    onClick = {
-                        mode = option
-                        report = null
-                        clearAiExplanation()
-                        if (option == PracticeMode.SHADOWING) targetLanguage = sourceLanguage
-                    },
-                    label = { Text(option.label) }
-                )
-            }
-        }
-
-        LanguageSelector("Source language", sourceLanguage) {
-            sourceLanguage = it
-            if (mode == PracticeMode.SHADOWING) targetLanguage = it
-            report = null
-            clearAiExplanation()
-        }
-        LanguageSelector("Target / trainee language", targetLanguage) {
-            targetLanguage = it
-            report = null
-            clearAiExplanation()
-        }
-
-        OutlinedTextField(
-            value = sourceText,
-            onValueChange = { sourceText = it; report = null; clearAiExplanation() },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp),
-            label = { Text("Source transcript") },
-            placeholder = { Text("Paste the original speech or source text here") }
-        )
-
-        OutlinedTextField(
-            value = traineeText,
-            onValueChange = { traineeText = it; report = null; clearAiExplanation() },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp),
-            label = { Text("Your transcript / interpretation") },
-            placeholder = { Text("Paste what you said here") }
-        )
-
-        Text("Timing (optional)", style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = sourceDurationSeconds,
-                onValueChange = {
-                    sourceDurationSeconds = it.filter { ch -> ch.isDigit() || ch == '.' }
-                    report = null
-                    clearAiExplanation()
-                },
-                modifier = Modifier.weight(1f),
-                label = { Text("Source seconds") },
-                singleLine = true
-            )
-            OutlinedTextField(
-                value = traineeDurationSeconds,
-                onValueChange = {
-                    traineeDurationSeconds = it.filter { ch -> ch.isDigit() || ch == '.' }
-                    report = null
-                    clearAiExplanation()
-                },
-                modifier = Modifier.weight(1f),
-                label = { Text("Your seconds") },
-                singleLine = true
-            )
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                enabled = sourceText.isNotBlank() || traineeText.isNotBlank() ||
-                    (sourceDurationSeconds.isNotBlank() && traineeDurationSeconds.isNotBlank()),
-                onClick = { analyze() }
-            ) {
-                Icon(Icons.Default.AutoAwesome, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("Analyze")
-            }
-            OutlinedButton(onClick = {
-                sourceText = ""
-                traineeText = ""
-                sourceDurationSeconds = ""
-                traineeDurationSeconds = ""
-                report = null
-                clearAiExplanation()
-            }) { Text("Clear") }
-        }
-
-        report?.let { result ->
-            SectionCard {
-                Text(result.scoreLabel, style = MaterialTheme.typography.titleMedium)
-                result.overallScore?.let { score ->
-                    Text("$score / 100", style = MaterialTheme.typography.headlineMedium)
-                    LinearProgressIndicator(
-                        progress = { score / 100f },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                Text(result.summary)
-            }
-
-            if (result.metrics.isNotEmpty()) {
-                SectionCard {
-                    Text("Metrics", style = MaterialTheme.typography.titleMedium)
-                    result.metrics.forEachIndexed { index, metric ->
-                        if (index > 0) HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(metric.label, style = MaterialTheme.typography.titleSmall)
-                            metric.score?.let { Text("$it/100") }
-                        }
-                        Text(metric.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-
-            if (result.strengths.isNotEmpty()) FeedbackListCard("Strengths", result.strengths)
-            if (result.improvements.isNotEmpty()) FeedbackListCard("Improve next", result.improvements)
-            if (result.evidence.isNotEmpty()) FeedbackListCard("Evidence", result.evidence)
-            result.limitation?.let {
-                SectionCard {
-                    Text("What the measured score can judge", style = MaterialTheme.typography.titleMedium)
-                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-
-            SectionCard {
-                Text("Neural coaching explanation", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    if (aiReady) {
-                        "The neural model can explain the measured report and suggest targeted exercises. It is not allowed to rewrite the evaluator's numeric score."
-                    } else {
-                        "Install Interpreter AI above to get a generated coaching explanation. The measured report remains available without it."
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                if (aiReady) {
-                    Button(
-                        enabled = !neuralLoading,
-                        onClick = {
-                            neuralLoading = true
-                            neuralError = null
-                            scope.launch {
-                                neuralAi.explainEvaluation(
-                                    mode = mode.label,
-                                    sourceLanguage = sourceLanguage.tag,
-                                    targetLanguage = targetLanguage.tag,
-                                    sourceText = sourceText,
-                                    traineeText = traineeText,
-                                    evaluatorReport = result.asPlainText()
-                                ).onSuccess {
-                                    neuralExplanation = it
-                                }.onFailure {
-                                    neuralError = it.message ?: "Neural explanation failed."
-                                }
-                                neuralLoading = false
-                            }
-                        }
-                    ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Explain with Interpreter AI")
-                    }
-                }
-
-                if (neuralLoading) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text("Generating coaching feedback…")
-                    }
-                }
-                neuralError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                if (neuralExplanation.isNotBlank()) {
-                    Text(neuralExplanation)
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
+@SuppressLint("SetJavaScriptEnabled")
+private fun configureCoachWebView(webView: WebView) {
+    webView.settings.apply {
+        javaScriptEnabled = true
+        domStorageEnabled = true
+        javaScriptCanOpenWindowsAutomatically = true
+        setSupportMultipleWindows(true)
+        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        allowFileAccess = false
+        allowContentAccess = false
+        cacheMode = WebSettings.LOAD_DEFAULT
     }
 }
 
-@Composable
-private fun FeedbackListCard(title: String, items: List<String>) {
-    SectionCard {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        items.forEach { item ->
-            Text("• $item", modifier = Modifier.padding(vertical = 2.dp))
+/** Puter authentication uses a browser popup, so Android WebView needs a real child window. */
+private class CoachChromeClient(private val context: Context) : WebChromeClient() {
+    @SuppressLint("SetJavaScriptEnabled")
+    override fun onCreateWindow(
+        view: WebView?,
+        isDialog: Boolean,
+        isUserGesture: Boolean,
+        resultMsg: Message?
+    ): Boolean {
+        val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+        val popup = WebView(context)
+        configureCoachWebView(popup)
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(popup, true)
         }
+
+        val dialog = Dialog(context)
+        popup.webViewClient = WebViewClient()
+        popup.webChromeClient = object : WebChromeClient() {
+            override fun onCloseWindow(window: WebView?) {
+                if (dialog.isShowing) dialog.dismiss()
+                runCatching { popup.destroy() }
+            }
+        }
+
+        dialog.setContentView(
+            popup,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        dialog.setOnDismissListener { runCatching { popup.destroy() } }
+
+        transport.webView = popup
+        resultMsg.sendToTarget()
+        dialog.show()
+        return true
     }
 }
 
-private fun formatModelBytes(bytes: Long): String {
-    if (bytes <= 0L) return "0 MB"
-    val mb = bytes.toDouble() / (1024.0 * 1024.0)
-    return if (mb >= 1024.0) "%.2f GB".format(mb / 1024.0) else "%.0f MB".format(mb)
+private fun buildPracticeContext(sessions: List<PracticeSessionEntity>): String = buildString {
+    if (sessions.isEmpty()) {
+        append("No saved practice sessions yet.")
+        return@buildString
+    }
+
+    appendLine("Recent saved Interpreter Trainer practice:")
+    sessions.sortedByDescending { it.startedAt }.take(5).forEachIndexed { index, session ->
+        append(
+            "${index + 1}. ${readableMode(session.practiceMode)}; " +
+                "${session.sourceLanguage} -> ${session.targetLanguage}; " +
+                "${session.durationMillis / 1000}s"
+        )
+        session.notes.takeIf { it.isNotBlank() }?.let {
+            append("; notes=${it.replace('\n', ' ').take(180)}")
+        }
+        session.aiFeedback?.takeIf { it.isNotBlank() }?.let {
+            append("; saved feedback=${it.replace('\n', ' ').take(350)}")
+        }
+        appendLine()
+    }
+}.take(5_000)
+
+private fun readableMode(mode: String): String = when (mode.uppercase(Locale.ROOT)) {
+    "SHADOWING" -> "Shadowing"
+    "CONSECUTIVE" -> "Consecutive Interpretation"
+    "SIGHT_TRANSLATION" -> "Sight Translation"
+    "LIVE_TRANSCRIPTION" -> "Live Transcription"
+    else -> mode.replace('_', ' ')
 }

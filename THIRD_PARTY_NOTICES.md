@@ -1,22 +1,26 @@
 # Third-party notices
 
-Interpreter Trainer includes integration with open-source / open-weight AI components for on-device neural chat.
+Interpreter Trainer integrates third-party hosted AI services and open-weight model families for its optional online Interpreter Coach.
 
-## Qwen2.5-0.5B-Instruct-GGUF
+## Puter.js
 
-- Project/model: Qwen2.5-0.5B-Instruct-GGUF by the Qwen team
-- Repository: `Qwen/Qwen2.5-0.5B-Instruct-GGUF`
-- Quantization used by the app: `qwen2.5-0.5b-instruct-q4_0.gguf`
-- License: Apache License 2.0
+- Project: Puter.js / Puter
+- Website and documentation: Puter Developer / Puter.js documentation
+- Integration: browser JavaScript SDK loaded by the Interpreter Coach WebView
 
-The model weights are downloaded separately by the user from the upstream model repository and stored in app-private Android storage. Interpreter Trainer does not claim authorship or ownership of the Qwen foundation model. The application supplies its own interpreter-training interface, deterministic evaluator, prompts, saved-session context and coaching workflow around the model.
+Puter.js provides the authentication and AI gateway used by Interpreter Coach. Interpreter Trainer does not claim authorship or ownership of Puter, Puter.js, or the hosted gateway.
 
-## llama.cpp
+The integration follows Puter's user-pays model: users authenticate with Puter when using hosted AI, and Interpreter Trainer does not embed a private provider API key in the APK.
 
-- Project: `ggml-org/llama.cpp`
-- License: MIT
-- Integration: official Android/JNI inference implementation, pinned in this repository as a git submodule
+## Qwen
 
-`llama.cpp` runs the GGUF language model directly on compatible Android devices. The app uses its Android inference engine to load the locally stored model, apply the Interpreter AI system prompt and stream generated tokens.
+Interpreter Coach currently requests these hosted Qwen models through Puter.js:
 
-Users and distributors should review and preserve applicable upstream licenses/notices when redistributing runtime or model components.
+- `qwen/qwen3.7-flash` for general chat
+- `qwen/qwen3.8-max` for deeper performance evaluation
+
+Qwen models are developed by Alibaba's Qwen team. Interpreter Trainer does not claim authorship or ownership of the underlying foundation models. The application supplies its own interpreter-training interface, prompts, practice-session context and evaluation workflow around the hosted model service.
+
+No Qwen model weights are bundled with or downloaded by the Android application.
+
+Users and distributors should review the current upstream service terms, model terms and notices applicable to the hosted models they use.

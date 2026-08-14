@@ -109,7 +109,7 @@ fun HomeScreen(
             item {
                 Text("Coach & review", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
             }
-            item { TrainingCard("Interpreter Coach", "Chat with your interpreter assistant, review progress and evaluate performance.", Icons.Default.AutoAwesome) { onNavigate(Routes.AI_COACH) } }
+            item { TrainingCard("Interpreter Coach", "Chat with online Qwen and evaluate a performance without downloading an AI model.", Icons.Default.AutoAwesome) { onNavigate(Routes.AI_COACH) } }
             item { TrainingCard("Practice History", "Review saved sessions, transcripts, recordings, notes and feedback.", Icons.Default.History) { onNavigate(Routes.HISTORY) } }
 
             item {

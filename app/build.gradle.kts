@@ -8,10 +8,6 @@ plugins {
 }
 
 val ciDebugKeystorePath = providers.environmentVariable("INTERPRETER_DEBUG_KEYSTORE").orNull
-val interpreterAiBaseUrl = providers.environmentVariable("INTERPRETER_AI_BASE_URL").orNull.orEmpty()
-val escapedInterpreterAiBaseUrl = interpreterAiBaseUrl
-    .replace("\\", "\\\\")
-    .replace("\"", "\\\"")
 
 android {
     namespace = "com.interpretertrainer.app"
@@ -23,14 +19,6 @@ android {
         targetSdk = 36
         versionCode = providers.environmentVariable("INTERPRETER_VERSION_CODE").orNull?.toIntOrNull() ?: 5
         versionName = "0.5.0"
-
-        // This is a public HTTPS URL only. Provider credentials stay on the hosted backend and are
-        // never embedded in the Android application.
-        buildConfigField(
-            "String",
-            "INTERPRETER_AI_BASE_URL",
-            "\"$escapedInterpreterAiBaseUrl\""
-        )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

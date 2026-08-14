@@ -8,29 +8,95 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  hosted-ai-smoke-test:
-    name: Generate a real online AI response
+  puter-ai-browser-test:
+    name: Exercise online Qwen flow in browser
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
     steps:
-      - name: Call hosted text generation endpoint
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install headless Chromium
+        working-directory: /tmp
+        run: |
+          mkdir -p /tmp/puter-ci
+          cd /tmp/puter-ci
+          npm init -y >/dev/null
+          npm install --silent playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Try temporary-user authentication and real Qwen generation
         shell: bash
         run: |
           set -euo pipefail
-          URL='https://gen.pollinations.ai/text/Reply%20with%20exactly%20INTERPRETER_AI_OK?seed=0'
-          STATUS="$(curl --location --silent --show-error --max-time 60 \
-            --output /tmp/interpreter-ai-response.txt \
-            --write-out '%{http_code}' "$URL")"
-          echo "HTTP status: $STATUS"
-          head -c 500 /tmp/interpreter-ai-response.txt || true
-          echo
-          test "$STATUS" = "200"
-          test -s /tmp/interpreter-ai-response.txt
-          grep -qi 'INTERPRETER_AI_OK' /tmp/interpreter-ai-response.txt
+          cat > /tmp/puter-ci/index.html <<'HTML'
+          <!doctype html><html><body>
+          <script src="https://js.puter.com/v2/"></script>
+          <button id="run" onclick="runTest()">Run</button>
+          <script>
+          window.__done = false;
+          window.__signed = false;
+          window.__result = '';
+          window.__error = '';
+          async function runTest() {
+            try {
+              if (!puter.auth.isSignedIn()) {
+                await puter.auth.signIn({ attempt_temp_user_creation: true });
+              }
+              window.__signed = puter.auth.isSignedIn();
+              const response = await puter.ai.chat(
+                'Reply in one short sentence confirming the online Interpreter AI works.',
+                { model: 'qwen/qwen3.7-flash', max_tokens: 80, temperature: 0 }
+              );
+              const content = response?.message?.content;
+              if (typeof content === 'string') window.__result = content.trim();
+              else if (Array.isArray(content)) window.__result = content.map(x => x?.text || '').join('').trim();
+              else if (typeof response === 'string') window.__result = response.trim();
+              else window.__result = response?.text || '';
+            } catch (e) {
+              window.__error = e?.msg || e?.message || String(e);
+            } finally {
+              window.__done = true;
+            }
+          }
+          </script></body></html>
+          HTML
+
+          python3 -m http.server 8765 --directory /tmp/puter-ci >/tmp/puter-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+
+          cat > /tmp/puter-ci/test.cjs <<'NODE'
+          const { chromium } = require('playwright');
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext();
+            const page = await context.newPage();
+            page.on('console', msg => console.log('BROWSER:', msg.text()));
+            page.on('popup', popup => console.log('AUTH POPUP:', popup.url()));
+            await page.goto('http://127.0.0.1:8765', { waitUntil: 'networkidle', timeout: 60000 });
+            await page.click('#run');
+            await page.waitForFunction(() => window.__done === true, null, { timeout: 120000 });
+            const result = await page.evaluate(() => ({
+              signed: window.__signed,
+              result: window.__result,
+              error: window.__error
+            }));
+            console.log('PUTER RESULT:', JSON.stringify(result));
+            await browser.close();
+            if (result.error) throw new Error(result.error);
+            if (!result.signed) throw new Error('Puter temporary-user authentication did not complete.');
+            if (!result.result || result.result.trim().length < 2) throw new Error('Qwen returned no visible text.');
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
+
+          cd /tmp/puter-ci
+          node test.cjs
 
   build:
     runs-on: ubuntu-latest
-    needs: hosted-ai-smoke-test
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -57,19 +123,24 @@ jobs:
             -storepass android -alias androiddebugkey >/dev/null
           echo "Stable Interpreter Trainer development signing key installed."
 
-      - name: Guard hosted Interpreter AI architecture
+      - name: Guard online Interpreter AI architecture
         shell: bash
         run: |
           set -euo pipefail
-          test -f app/src/main/java/com/interpretertrainer/app/ai/OnlineInterpreterAi.kt
+          test -f app/src/main/assets/interpreter_coach.html
           test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnDeviceInterpreterAi.kt
           test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnDeviceModelManager.kt
-          if grep -R -E "litertlm|LiteRT-LM|Install Interpreter AI|MODEL_DOWNLOAD_SIZE_LABEL" \
+          test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnlineInterpreterAi.kt
+          if grep -R -E "litertlm|LiteRT-LM|Install Interpreter AI|MODEL_DOWNLOAD_SIZE_LABEL|INTERPRETER_AI_BASE_URL" \
               app/src/main app/build.gradle.kts; then
-            echo "On-device neural model code must not return to the Android app."
+            echo "Old local-model or placeholder-backend AI code must not return."
             exit 1
           fi
-          grep -q "OnlineInterpreterAi" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q "https://js.puter.com/v2/" app/src/main/assets/interpreter_coach.html
+          grep -q "qwen/qwen3.7-flash" app/src/main/assets/interpreter_coach.html
+          grep -q "qwen/qwen3.8-max" app/src/main/assets/interpreter_coach.html
+          grep -q "attempt_temp_user_creation" app/src/main/assets/interpreter_coach.html
+          grep -q "CoachChromeClient" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
 
       - name: Build debug APK
         env:

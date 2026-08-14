@@ -82,31 +82,31 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
         .bufferedReader(Charsets.UTF_8)
         .use { it.readText() }
 
-    return WebView(context).apply {
-        layoutParams = ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        )
-        configureCoachWebView(this)
-        addJavascriptInterface(bridge, "InterpreterNative")
-        webViewClient = WebViewClient()
-        webChromeClient = CoachChromeClient(context)
+    val webView = WebView(context)
+    webView.layoutParams = ViewGroup.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT
+    )
+    configureCoachWebView(webView)
+    webView.addJavascriptInterface(bridge, "InterpreterNative")
+    webView.webViewClient = WebViewClient()
+    webView.webChromeClient = CoachChromeClient(context)
 
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setAcceptThirdPartyCookies(this@apply, true)
-        }
-
-        // A stable HTTPS origin gives Puter.js normal browser auth/cookie semantics while the page
-        // itself remains bundled with the APK.
-        loadDataWithBaseURL(
-            "https://interpreter-trainer.app/",
-            html,
-            "text/html",
-            "UTF-8",
-            null
-        )
+    CookieManager.getInstance().apply {
+        setAcceptCookie(true)
+        setAcceptThirdPartyCookies(webView, true)
     }
+
+    // A stable HTTPS origin gives Puter.js normal browser auth/cookie semantics while the page
+    // itself remains bundled with the APK.
+    webView.loadDataWithBaseURL(
+        "https://interpreter-trainer.app/",
+        html,
+        "text/html",
+        "UTF-8",
+        null
+    )
+    return webView
 }
 
 @SuppressLint("SetJavaScriptEnabled")

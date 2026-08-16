@@ -101,10 +101,27 @@ fun HomeScreen(
             item {
                 Text("Practice", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
             }
-            item { TrainingCard("Sight Translation", "Read and translate source text with timing, notes and session history.", Icons.Default.Article) { onNavigate(Routes.SIGHT) } }
-            item { TrainingCard("Shadowing", "Play source media while your microphone records your shadowing performance.", Icons.Default.GraphicEq) { onNavigate(Routes.SHADOWING) } }
-            item { TrainingCard("Consecutive Interpretation", "Work through reliable 15, 30 or 60 second source segments.", Icons.Default.SkipNext) { onNavigate(Routes.CONSECUTIVE) } }
-            item { TrainingCard("Live Transcription", "Capture speech in Arabic, English or French for review and practice.", Icons.Default.Mic) { onNavigate(Routes.TRANSCRIPTION) } }
+            item {
+                TrainingCard(
+                    "Simultaneous Interpretation",
+                    "Interpret from video/audio with the source text beside it, record your delivery and review the transcript.",
+                    Icons.Default.Headphones
+                ) { onNavigate(Routes.SIMULTANEOUS) }
+            }
+            item {
+                TrainingCard(
+                    "Consecutive Interpretation",
+                    "Work through reliable 15, 30 or 60 second source segments.",
+                    Icons.Default.SkipNext
+                ) { onNavigate(Routes.CONSECUTIVE) }
+            }
+            item {
+                TrainingCard(
+                    "Live Transcription",
+                    "Capture speech in Arabic, English or French for review and practice.",
+                    Icons.Default.Mic
+                ) { onNavigate(Routes.TRANSCRIPTION) }
+            }
 
             item {
                 Text("Coach & review", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
@@ -144,8 +161,8 @@ fun HomeScreen(
                         context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:zohaireachak@gmail.com")))
                     }) { Text("zohaireachak@gmail.com") }
                     TextButton(onClick = {
-                        context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:0655156667")))
-                    }) { Text("0655156667") }
+                        context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:+212655156667")))
+                    }) { Text("+212655156667") }
                     Text(
                         "Interpreter Trainer",
                         style = MaterialTheme.typography.bodySmall,

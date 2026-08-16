@@ -12,8 +12,7 @@ import com.interpretertrainer.app.viewmodel.SessionViewModel
 
 object Routes {
     const val HOME = "home"
-    const val SIGHT = "sight"
-    const val SHADOWING = "shadowing"
+    const val SIMULTANEOUS = "simultaneous"
     const val CONSECUTIVE = "consecutive"
     const val TRANSCRIPTION = "transcription"
     const val AI_COACH = "ai-coach"
@@ -36,9 +35,8 @@ fun InterpreterTrainerApp(
                 onThemeModeChange = onThemeModeChange
             )
         }
-        composable(Routes.SIGHT) { SightTranslationScreen(onBack = navController::popBackStack, sessionViewModel) }
-        composable(Routes.SHADOWING) {
-            ShadowingScreen(
+        composable(Routes.SIMULTANEOUS) {
+            SimultaneousScreen(
                 onBack = navController::popBackStack,
                 sessionViewModel = sessionViewModel,
                 onOpenAiCoach = { navController.navigate(Routes.AI_COACH) }

@@ -5,8 +5,12 @@ Interpreter Trainer is an Android 12+ application for Arabic, English and French
 ## Current capabilities
 
 - Branded Compose home dashboard with System / Light / Dark appearance modes
-- Sight Translation practice with text-size controls, timing, notes and session saving
-- Shadowing with Media3 playback, 0.75x / 1.0x / 1.25x speed, simultaneous trainee microphone recording, replay, notes and feedback
+- Simultaneous Interpretation with a modern responsive source workspace:
+  - video/audio pane with local files or direct playable media URLs
+  - source text / transcript pane displayed beside the media on larger screens and stacked cleanly on phones
+  - source and target language selection
+  - microphone recording while source media plays
+  - recording replay, interpretation transcript, notes and measurable local feedback
 - Consecutive Interpretation with 15 / 30 / 60 second playback-position segments, replay / previous / next controls, notes and transcript fields
 - Local media import plus direct network audio/video URLs; progressive media, HLS and DASH playback modules are included
 - Live external-audio indicator for Bluetooth, wired headset / headphones and other external outputs
@@ -14,6 +18,8 @@ Interpreter Trainer is an Android 12+ application for Arabic, English and French
 - Practice History with Room persistence, recordings, notes, transcripts and saved feedback
 - Interpreter Coach with online Qwen3.6 27B chat and performance evaluation
 - GitHub Actions debug APK build with stable development signing
+
+Sight Translation is no longer an active training mode. Existing historical session records are preserved rather than deleted.
 
 ## Online Interpreter AI
 
@@ -47,7 +53,7 @@ Interpreter AI requires an internet connection. There is no neural model downloa
 
 When the user chooses to use Interpreter AI, the text they submit and relevant practice context supplied to the coach are sent to the hosted AI service so it can generate a response. Users authenticate with the AI gateway on first use.
 
-Core practice features, saved history and the deterministic local evaluator can continue to exist independently of hosted AI availability where they are used elsewhere in the app.
+Core practice features, saved history and the deterministic local evaluator can continue independently of hosted AI availability where they are used elsewhere in the app.
 
 ## Build on GitHub
 
@@ -71,7 +77,7 @@ Package/application ID: `com.interpretertrainer.app`
 
 Application owner: **Zouhair Elachaqi**  
 Email: **zohaireachak@gmail.com**  
-Phone: **0655156667**
+Phone: **+212655156667**
 
 Third-party notices are documented in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 

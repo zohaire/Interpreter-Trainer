@@ -3,6 +3,8 @@ package com.interpretertrainer.app.ui.screens
 import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.os.Message
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -11,6 +13,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -123,7 +126,16 @@ private fun configureCoachWebView(webView: WebView) {
     }
 }
 
-/** Puter authentication uses a browser popup, so Android WebView needs a real child window. */
+/**
+ * Puter authentication opens a JavaScript popup. Android WebView delivers that popup through
+ * onCreateWindow(), but a Dialog whose window stays WRAP_CONTENT can collapse a MATCH_PARENT
+ * child WebView to effectively 0x0. The user then only sees the dimmed parent screen and closing
+ * it makes Puter report auth_window_closed.
+ *
+ * Keep the popup as a true child WebView (so window.opener/postMessage and shared cookies keep
+ * working), but place it in a full-screen container and force the Dialog window itself to
+ * MATCH_PARENT after show().
+ */
 private class CoachChromeClient(private val context: Context) : WebChromeClient() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreateWindow(
@@ -133,34 +145,62 @@ private class CoachChromeClient(private val context: Context) : WebChromeClient(
         resultMsg: Message?
     ): Boolean {
         val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
-        val popup = WebView(context)
+
+        val popup = WebView(context).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            setBackgroundColor(Color.WHITE)
+        }
         configureCoachWebView(popup)
+
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(popup, true)
         }
 
         val dialog = Dialog(context)
+        val popupContainer = FrameLayout(context).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            setBackgroundColor(Color.WHITE)
+            addView(
+                popup,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+
         popup.webViewClient = WebViewClient()
         popup.webChromeClient = object : WebChromeClient() {
             override fun onCloseWindow(window: WebView?) {
                 if (dialog.isShowing) dialog.dismiss()
-                runCatching { popup.destroy() }
             }
         }
 
-        dialog.setContentView(
-            popup,
-            ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        )
-        dialog.setOnDismissListener { runCatching { popup.destroy() } }
+        dialog.setContentView(popupContainer)
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.setOnDismissListener {
+            runCatching { popup.stopLoading() }
+            runCatching { popup.destroy() }
+        }
 
         transport.webView = popup
         resultMsg.sendToTarget()
+
         dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.WHITE))
+            setLayout(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
         return true
     }
 }

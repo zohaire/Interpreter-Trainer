@@ -14,13 +14,10 @@ The integration follows Puter's user-pays model: users authenticate with Puter w
 
 ## Qwen
 
-Interpreter Coach currently requests these hosted Qwen models through Puter.js:
+Interpreter Coach currently requests the hosted `qwen/qwen3.6-27b` model through Puter.js for both general interpreter-training chat and performance evaluation.
 
-- `qwen/qwen3.7-flash` for general chat
-- `qwen/qwen3.8-max` for deeper performance evaluation
-
-Qwen models are developed by Alibaba's Qwen team. Interpreter Trainer does not claim authorship or ownership of the underlying foundation models. The application supplies its own interpreter-training interface, prompts, practice-session context and evaluation workflow around the hosted model service.
+Qwen3.6 27B is developed by Alibaba's Qwen team and is published as an open-weight model under the Apache 2.0 license. Interpreter Trainer does not claim authorship or ownership of the underlying foundation model. The application supplies its own interpreter-training interface, prompts, practice-session context and evaluation workflow around the hosted model service.
 
 No Qwen model weights are bundled with or downloaded by the Android application.
 
-Users and distributors should review the current upstream service terms, model terms and notices applicable to the hosted models they use.
+Users and distributors should review the current upstream service terms, model terms and notices applicable to the hosted model they use.

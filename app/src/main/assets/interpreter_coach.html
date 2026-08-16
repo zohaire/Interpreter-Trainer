@@ -62,9 +62,9 @@
     <div class="status">
       <div id="statusDot" class="dot"></div>
       <div>
-        <div class="title">Interpreter AI · online</div>
+        <div class="title">Interpreter AI · Qwen3.6 27B · online</div>
         <div id="statusText" class="sub">Loading the online AI service…</div>
-        <div class="small" style="margin-top:8px">Qwen runs online. No 400–500 MB model package is installed on your phone.</div>
+        <div class="small" style="margin-top:8px">Qwen3.6 27B runs online. No 400–500 MB model package is installed on your phone.</div>
         <div class="actions">
           <button id="connectBtn" onclick="connectAi()">Connect Interpreter AI</button>
         </div>
@@ -89,7 +89,7 @@
   <section id="evaluatePane" class="pane">
     <div class="card">
       <div class="title">AI performance evaluation</div>
-      <div class="sub">Paste the source and what you interpreted. Qwen will compare them and give targeted interpreter-training feedback.</div>
+      <div class="sub">Paste the source and what you interpreted. Qwen3.6 27B will compare them and give targeted interpreter-training feedback.</div>
       <div class="grid2" style="margin-top:14px">
         <div class="field"><label>Practice mode</label><select id="mode"><option>Shadowing</option><option>Consecutive Interpretation</option><option>Sight Translation</option></select></div>
         <div class="field"><label>Language direction</label><input id="languages" placeholder="e.g. English → Arabic" /></div>
@@ -108,8 +108,9 @@
 </div>
 
 <script>
-  const CHAT_MODEL = 'qwen/qwen3.7-flash';
-  const EVALUATION_MODEL = 'qwen/qwen3.8-max';
+  const AI_MODEL = 'qwen/qwen3.6-27b';
+  const CHAT_MODEL = AI_MODEL;
+  const EVALUATION_MODEL = AI_MODEL;
   const history = [];
   let busy = false;
 
@@ -136,7 +137,7 @@
     const wrap = document.createElement('div');
     const label = document.createElement('div');
     label.className = 'label';
-    label.textContent = role === 'user' ? 'You' : 'Interpreter AI · Qwen';
+    label.textContent = role === 'user' ? 'You' : 'Interpreter AI · Qwen3.6 27B';
     const bubble = document.createElement('div');
     bubble.className = 'bubble' + (role === 'user' ? ' user' : '');
     bubble.textContent = text;
@@ -164,10 +165,10 @@
     }
     try {
       if (!puter.auth.isSignedIn()) {
-        setStatus('Connecting to Interpreter AI…');
+        setStatus('Connecting to Qwen3.6 27B…');
         await puter.auth.signIn({ attempt_temp_user_creation: true });
       }
-      setStatus('Connected. Interpreter AI is ready.', 'ok');
+      setStatus('Connected to Qwen3.6 27B. Interpreter AI is ready.', 'ok');
       document.getElementById('connectBtn').textContent = 'AI connected';
       return true;
     } catch (error) {
@@ -199,11 +200,11 @@
     busy = true;
     document.getElementById('sendBtn').disabled = true;
     const loadingId = 'loading-' + Date.now();
-    const loading = document.createElement('div'); loading.id = loadingId; loading.className = 'loading'; loading.textContent = 'Interpreter AI is thinking…';
+    const loading = document.createElement('div'); loading.id = loadingId; loading.className = 'loading'; loading.textContent = 'Qwen3.6 27B is thinking…';
     document.getElementById('messages').appendChild(loading);
 
     try {
-      const system = `You are Interpreter AI, a specialized coach for professional interpreters and interpreter students. Help with shadowing, consecutive interpreting, sight translation, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. Reply naturally in the user's language, especially English, French or Arabic. Be practical and specific. Never invent a user's score, transcript or improvement trend. Use saved practice context only when it actually supports the answer.\n\nSaved practice context:\n${nativePracticeContext()}`;
+      const system = `You are Interpreter AI, a specialized coach for professional interpreters and interpreter students. Help with shadowing, consecutive interpreting, sight translation, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. Work especially well across Arabic, English and French. Reply naturally in the user's language. Be practical and specific. Never invent a user's score, transcript or improvement trend. Use saved practice context only when it actually supports the answer.\n\nSaved practice context:\n${nativePracticeContext()}`;
       const messages = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
       const response = await puter.ai.chat(messages, { model: CHAT_MODEL, max_tokens: 700, temperature: 0.25 });
       const answer = responseText(response);
@@ -211,7 +212,7 @@
       history.push({ role:'user', content:text }, { role:'assistant', content:answer });
       document.getElementById(loadingId)?.remove();
       addMessage('assistant', answer);
-      setStatus('Connected. Interpreter AI is ready.', 'ok');
+      setStatus('Connected to Qwen3.6 27B. Interpreter AI is ready.', 'ok');
     } catch (error) {
       document.getElementById(loadingId)?.remove();
       const message = error?.msg || error?.message || String(error);
@@ -234,7 +235,7 @@
 
     busy = true;
     document.getElementById('evaluateBtn').disabled = true;
-    document.getElementById('evaluationResult').innerHTML = '<div class="card loading">Interpreter AI is evaluating the performance…</div>';
+    document.getElementById('evaluationResult').innerHTML = '<div class="card loading">Qwen3.6 27B is evaluating the performance…</div>';
 
     const mode = document.getElementById('mode').value;
     const languages = document.getElementById('languages').value.trim() || 'not specified';
@@ -252,11 +253,11 @@
       const answer = responseText(response);
       if (!answer) throw new Error('The AI returned an empty evaluation.');
       const card = document.createElement('div'); card.className = 'card';
-      const title = document.createElement('div'); title.className = 'title'; title.textContent = 'Interpreter AI evaluation';
+      const title = document.createElement('div'); title.className = 'title'; title.textContent = 'Interpreter AI evaluation · Qwen3.6 27B';
       const body = document.createElement('div'); body.className = 'bubble'; body.textContent = answer;
       card.appendChild(title); card.appendChild(body);
       const result = document.getElementById('evaluationResult'); result.innerHTML = ''; result.appendChild(card);
-      setStatus('Connected. Interpreter AI is ready.', 'ok');
+      setStatus('Connected to Qwen3.6 27B. Interpreter AI is ready.', 'ok');
     } catch (error) {
       const message = error?.msg || error?.message || String(error);
       document.getElementById('evaluationResult').innerHTML = '<div class="card error">AI evaluation failed: ' + escapeHtml(message) + '</div>';
@@ -275,9 +276,9 @@
   });
 
   window.addEventListener('load', () => {
-    addMessage('assistant', 'Hi. I’m Interpreter AI. Ask me about interpreting technique or your saved practice, or open Evaluate to review a performance.');
+    addMessage('assistant', 'Hi. I’m Interpreter AI powered by Qwen3.6 27B. Ask me about interpreting technique or your saved practice, or open Evaluate to review a performance.');
     if (!window.puter) setStatus('The online AI library could not load. Check your connection.', 'bad');
-    else if (puter.auth.isSignedIn()) setStatus('Connected. Interpreter AI is ready.', 'ok');
+    else if (puter.auth.isSignedIn()) setStatus('Connected to Qwen3.6 27B. Interpreter AI is ready.', 'ok');
     else setStatus('Ready. Tap Connect Interpreter AI or simply send your first message.');
   });
 </script>

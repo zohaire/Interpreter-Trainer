@@ -12,17 +12,14 @@ Interpreter Trainer is an Android 12+ application for Arabic, English and French
 - Live external-audio indicator for Bluetooth, wired headset / headphones and other external outputs
 - Live Transcription with Android SpeechRecognizer and ar-MA / en-US / fr-FR selection
 - Practice History with Room persistence, recordings, notes, transcripts and saved feedback
-- Interpreter Coach with online Qwen chat and performance evaluation
+- Interpreter Coach with online Qwen3.6 27B chat and performance evaluation
 - GitHub Actions debug APK build with stable development signing
 
 ## Online Interpreter AI
 
-Interpreter Coach no longer downloads or runs a large neural model on the phone. There is no LiteRT/llama.cpp runtime and no 400–500 MB model package.
+Interpreter Coach does not download or run a large neural model on the phone. There is no LiteRT/llama.cpp runtime and no 400–500 MB model package.
 
-The coach uses Puter.js to access hosted Qwen models over the internet:
-
-- `qwen/qwen3.7-flash` for responsive interpreter-training chat
-- `qwen/qwen3.8-max` for deeper performance evaluation
+The coach uses Puter.js to access the hosted `qwen/qwen3.6-27b` model over the internet for both interpreter-training chat and performance evaluation.
 
 Puter.js uses a user-pays architecture, so Interpreter Trainer does not embed a private AI provider key and does not require an owner-hosted backend. The first time a user accesses Interpreter AI, Puter handles authentication in a browser popup. After authentication, chat and evaluation requests are sent online.
 
@@ -38,7 +35,7 @@ The Evaluate tab accepts:
 - trainee / interpretation transcript
 - optional source and trainee durations
 
-The hosted Qwen evaluator is prompted to examine meaning transfer, omissions, additions, numbers, names, terminology, reformulation, register, fluency and delivery when the supplied evidence allows it. Cross-language evaluation is based on meaning rather than word overlap. AI feedback remains advisory and should not be treated as a certified examination result.
+Qwen3.6 27B is prompted to examine meaning transfer, omissions, additions, numbers, names, terminology, reformulation, register, fluency and delivery when the supplied evidence allows it. Cross-language evaluation is based on meaning rather than word overlap. AI feedback remains advisory and should not be treated as a certified examination result.
 
 ## Media URL scope
 
@@ -60,7 +57,7 @@ The Android build command is:
 gradle --no-daemon :app:assembleDebug
 ```
 
-The GitHub workflow also checks that the old on-device neural-model architecture has not returned, verifies that the selected Qwen models are present in Puter's live model catalog, validates the Puter authentication flow, and verifies the stable APK signing certificate.
+The GitHub workflow also checks that the old on-device neural-model architecture has not returned, verifies that `qwen/qwen3.6-27b` is present in Puter's live model catalog, validates the Puter authentication flow, and verifies the stable APK signing certificate.
 
 Open **Actions → Build Android Debug APK**, then download `interpreter-trainer-debug-apk` from a successful run's Artifacts section.
 

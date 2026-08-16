@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Verify live Puter model catalog contains our Qwen models
+      - name: Verify live Puter model catalog contains Qwen3.6 27B
         shell: bash
         run: |
           set -euo pipefail
@@ -21,9 +21,8 @@ jobs:
             https://api.puter.com/puterai/chat/models/details \
             --output /tmp/puter-models.json
           test -s /tmp/puter-models.json
-          grep -q 'qwen/qwen3.7-flash' /tmp/puter-models.json
-          grep -q 'qwen/qwen3.8-max' /tmp/puter-models.json
-          echo "Both Interpreter AI Qwen models are present in Puter's live catalog."
+          grep -q 'qwen/qwen3.6-27b' /tmp/puter-models.json
+          echo "Qwen3.6 27B is present in Puter's live catalog."
 
       - name: Set up Node 22
         uses: actions/setup-node@v4
@@ -125,8 +124,11 @@ jobs:
             exit 1
           fi
           grep -q "https://js.puter.com/v2/" app/src/main/assets/interpreter_coach.html
-          grep -q "qwen/qwen3.7-flash" app/src/main/assets/interpreter_coach.html
-          grep -q "qwen/qwen3.8-max" app/src/main/assets/interpreter_coach.html
+          grep -q "qwen/qwen3.6-27b" app/src/main/assets/interpreter_coach.html
+          if grep -q -E "qwen/qwen3.7-flash|qwen/qwen3.8-max" app/src/main/assets/interpreter_coach.html; then
+            echo "Legacy Interpreter AI model routing is still present."
+            exit 1
+          fi
           grep -q "attempt_temp_user_creation" app/src/main/assets/interpreter_coach.html
           grep -q "CoachChromeClient" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
 

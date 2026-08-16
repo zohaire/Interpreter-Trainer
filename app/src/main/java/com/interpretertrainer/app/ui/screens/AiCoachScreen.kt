@@ -92,7 +92,28 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
     )
     configureCoachWebView(webView)
     webView.addJavascriptInterface(bridge, "InterpreterNative")
-    webView.webViewClient = WebViewClient()
+    webView.webViewClient = object : WebViewClient() {
+        override fun onPageFinished(view: WebView?, url: String?) {
+            super.onPageFinished(view, url)
+            view?.evaluateJavascript(
+                """
+                (() => {
+                  const mode = document.getElementById('mode');
+                  if (mode) {
+                    mode.innerHTML = '<option>Simultaneous Interpretation</option><option>Consecutive Interpretation</option><option>Live Transcription</option>';
+                  }
+                  const suggestions = Array.from(document.querySelectorAll('.suggestion'));
+                  const oldShadowing = suggestions.find(button => button.textContent.includes('Shadowing'));
+                  if (oldShadowing) {
+                    oldShadowing.textContent = 'Simultaneous exercise';
+                    oldShadowing.onclick = () => window.useSuggestion?.('Give me a short simultaneous interpreting exercise in English, French, or Arabic.');
+                  }
+                })();
+                """.trimIndent(),
+                null
+            )
+        }
+    }
     webView.webChromeClient = CoachChromeClient(context)
 
     CookieManager.getInstance().apply {

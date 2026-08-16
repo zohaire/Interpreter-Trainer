@@ -229,6 +229,7 @@ private fun buildPracticeContext(sessions: List<PracticeSessionEntity>): String 
 }.take(5_000)
 
 private fun readableMode(mode: String): String = when (mode.uppercase(Locale.ROOT)) {
+    "SIMULTANEOUS_INTERPRETATION" -> "Simultaneous Interpretation"
     "SHADOWING" -> "Shadowing"
     "CONSECUTIVE" -> "Consecutive Interpretation"
     "SIGHT_TRANSLATION" -> "Sight Translation"

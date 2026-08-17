@@ -132,6 +132,9 @@ jobs:
           grep -q "attempt_temp_user_creation" app/src/main/assets/interpreter_coach.html
           grep -q "CoachChromeClient" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
 
+      - name: Test media link routing
+        run: gradle --no-daemon :app:testDebugUnitTest
+
       - name: Build debug APK
         env:
           INTERPRETER_VERSION_CODE: ${{ github.run_number }}

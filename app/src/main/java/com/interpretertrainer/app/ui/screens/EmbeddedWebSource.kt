@@ -37,7 +37,7 @@ fun EmbeddedWebSource(
     AndroidView(
         modifier = modifier,
         factory = { context ->
-            WebView(context).apply {
+            val sourceWebView = WebView(context).apply {
                 setBackgroundColor(Color.BLACK)
                 settings.apply {
                     javaScriptEnabled = true
@@ -52,10 +52,6 @@ fun EmbeddedWebSource(
                     loadWithOverviewMode = true
                     useWideViewPort = true
                 }
-                CookieManager.getInstance().apply {
-                    setAcceptCookie(true)
-                    setAcceptThirdPartyCookies(this@apply, true)
-                }
                 webChromeClient = WebChromeClient()
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
@@ -63,9 +59,14 @@ fun EmbeddedWebSource(
                         return scheme != "http" && scheme != "https"
                     }
                 }
-                loadUrl(url)
-                webViewRef.value = this
             }
+            CookieManager.getInstance().apply {
+                setAcceptCookie(true)
+                setAcceptThirdPartyCookies(sourceWebView, true)
+            }
+            sourceWebView.loadUrl(url)
+            webViewRef.value = sourceWebView
+            sourceWebView
         },
         update = { webView ->
             if (webView.url != url) webView.loadUrl(url)

@@ -15,6 +15,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 
+private const val INTERPRETER_WEB_ORIGIN = "https://interpreter-trainer.app/"
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun EmbeddedWebSource(
@@ -64,12 +66,25 @@ fun EmbeddedWebSource(
                 setAcceptCookie(true)
                 setAcceptThirdPartyCookies(sourceWebView, true)
             }
-            sourceWebView.loadUrl(url)
+            sourceWebView.tag = url
+            loadEmbeddedSource(sourceWebView, url)
             webViewRef.value = sourceWebView
             sourceWebView
         },
         update = { webView ->
-            if (webView.url != url) webView.loadUrl(url)
+            if (webView.tag != url) {
+                webView.tag = url
+                loadEmbeddedSource(webView, url)
+            }
         }
     )
+}
+
+private fun loadEmbeddedSource(webView: WebView, url: String) {
+    val needsReferrer = url.contains("youtube.com/embed/") || url.contains("player.vimeo.com/video/")
+    if (needsReferrer) {
+        webView.loadUrl(url, mapOf("Referer" to INTERPRETER_WEB_ORIGIN))
+    } else {
+        webView.loadUrl(url)
+    }
 }

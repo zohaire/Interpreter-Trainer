@@ -6,13 +6,13 @@ Interpreter Trainer is an Android 12+ application for Arabic, English and French
 
 - Branded Compose home dashboard with System / Light / Dark appearance modes
 - Simultaneous Interpretation with a modern responsive source workspace:
-  - video/audio pane with local files or direct playable media URLs
+  - video/audio pane with local files, direct streams, YouTube/Vimeo and ordinary webpage links
   - source text / transcript pane displayed beside the media on larger screens and stacked cleanly on phones
   - source and target language selection
   - microphone recording while source media plays
   - recording replay, interpretation transcript, notes and measurable local feedback
-- Consecutive Interpretation with 15 / 30 / 60 second playback-position segments, replay / previous / next controls, notes and transcript fields
-- Local media import plus direct network audio/video URLs; progressive media, HLS and DASH playback modules are included
+- Consecutive Interpretation with 15 / 30 / 60 second playback-position segments for native/direct media plus embedded web-player support for webpage links
+- Local media import plus network links; progressive media, HLS and DASH playback modules are included
 - Live external-audio indicator for Bluetooth, wired headset / headphones and other external outputs
 - Live Transcription with Android SpeechRecognizer and ar-MA / en-US / fr-FR selection
 - Practice History with Room persistence, recordings, notes, transcripts and saved feedback
@@ -43,9 +43,15 @@ The Evaluate tab accepts:
 
 Qwen3.6 27B is prompted to examine meaning transfer, omissions, additions, numbers, names, terminology, reformulation, register, fluency and delivery when the supplied evidence allows it. Cross-language evaluation is based on meaning rather than word overlap. AI feedback remains advisory and should not be treated as a certified examination result.
 
-## Media URL scope
+## Media link support
 
-The URL field is for a **direct playable media or stream URL**, such as a direct MP4/MP3/M4A/WebM file, HLS playlist or DASH manifest. A normal webpage URL is not automatically a media stream and may not be playable unless the site exposes a direct compatible media endpoint.
+The media-link field accepts links with or without an explicit `https://` prefix and can extract a URL pasted as part of shared text.
+
+Direct MP4/MP3/M4A/WebM media, HLS playlists, DASH manifests and other recognized media files use the native Media3 player. YouTube and Vimeo links are converted to their embedded-player form, while ordinary webpage links open in a restricted in-app WebView instead of being incorrectly treated as raw media files.
+
+For Simultaneous Interpretation, web-player playback and microphone recording are intentionally independent: use the controls inside the embedded page while the app records your interpretation. In Consecutive Interpretation, precise 15/30/60-second automatic seeking remains available for local/direct media; webpage players use their own controls because arbitrary websites do not expose reliable seek control to the app.
+
+Some websites can still require sign-in, restrict embedding, or block playback in third-party WebViews. Interpreter Trainer does not bypass a website's access controls or extract protected media streams.
 
 ## Privacy and connectivity
 
@@ -63,7 +69,7 @@ The Android build command is:
 gradle --no-daemon :app:assembleDebug
 ```
 
-The GitHub workflow also checks that the old on-device neural-model architecture has not returned, verifies that `qwen/qwen3.6-27b` is present in Puter's live model catalog, validates the Puter authentication flow, and verifies the stable APK signing certificate.
+The GitHub workflow also runs media-link regression tests, checks that the old on-device neural-model architecture has not returned, verifies that `qwen/qwen3.6-27b` is present in Puter's live model catalog, validates the Puter authentication flow, and verifies the stable APK signing certificate.
 
 Open **Actions → Build Android Debug APK**, then download `interpreter-trainer-debug-apk` from a successful run's Artifacts section.
 

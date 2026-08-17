@@ -31,6 +31,7 @@ import androidx.media3.ui.PlayerView
 import com.interpretertrainer.app.ai.LocalInterpreterCoach
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.media.MediaController
+import com.interpretertrainer.app.media.MediaLinkResolver
 import com.interpretertrainer.app.media.ShadowingRecorder
 import com.interpretertrainer.app.model.LanguageOption
 import com.interpretertrainer.app.model.PracticeMode
@@ -51,7 +52,8 @@ fun SimultaneousScreen(
     val recorder = remember { ShadowingRecorder(context.applicationContext) }
 
     var sourceName by rememberSaveable { mutableStateOf<String?>(null) }
-    var hasMedia by rememberSaveable { mutableStateOf(false) }
+    var hasNativeMedia by rememberSaveable { mutableStateOf(false) }
+    var webSourceUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var mediaUrl by rememberSaveable { mutableStateOf("") }
     var sourceText by rememberSaveable { mutableStateOf("") }
     var interpretationTranscript by rememberSaveable { mutableStateOf("") }
@@ -67,14 +69,15 @@ fun SimultaneousScreen(
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var isRecording by remember { mutableStateOf(false) }
 
-    val hasSource = hasMedia || sourceText.isNotBlank()
+    val hasWebSource = !webSourceUrl.isNullOrBlank()
+    val hasSource = hasNativeMedia || hasWebSource || sourceText.isNotBlank()
 
     fun clearFeedback() {
         localFeedback = ""
         localScore = null
     }
 
-    fun resetPracticeForNewMedia() {
+    fun resetPracticeForNewSource() {
         recordingElapsed = 0L
         recordingPath = null
         clearFeedback()
@@ -85,28 +88,45 @@ fun SimultaneousScreen(
         uri?.let {
             sourceName = it.lastPathSegment ?: "Local media"
             sourceMedia.load(it)
-            hasMedia = true
+            hasNativeMedia = true
+            webSourceUrl = null
             mediaUrl = ""
-            resetPracticeForNewMedia()
+            resetPracticeForNewSource()
         }
     }
 
     fun loadNetworkSource() {
-        sourceMedia.loadUrl(mediaUrl)
-            .onSuccess {
-                val parsed = Uri.parse(mediaUrl.trim())
-                sourceName = parsed.lastPathSegment?.takeIf { it.isNotBlank() } ?: "Online media"
-                hasMedia = true
-                resetPracticeForNewMedia()
-            }
-            .onFailure {
-                errorMessage = it.message ?: "Could not load that media URL."
-            }
+        val resolved = MediaLinkResolver.resolve(mediaUrl).getOrElse {
+            errorMessage = it.message ?: "That link is not valid."
+            return
+        }
+
+        mediaUrl = resolved.normalizedUrl
+        sourceMedia.pause()
+
+        if (resolved.usesNativePlayer) {
+            sourceMedia.loadUrl(resolved.playbackUrl)
+                .onSuccess {
+                    sourceName = resolved.displayName
+                    hasNativeMedia = true
+                    webSourceUrl = null
+                    resetPracticeForNewSource()
+                }
+                .onFailure {
+                    errorMessage = it.message ?: "Could not load that direct media link."
+                }
+        } else {
+            sourceMedia.clear()
+            sourceName = resolved.displayName
+            hasNativeMedia = false
+            webSourceUrl = resolved.playbackUrl
+            resetPracticeForNewSource()
+        }
     }
 
     fun beginInterpretation() {
         if (!hasSource) {
-            errorMessage = "Add a video/audio source or paste source text first."
+            errorMessage = "Add a video/audio source, web link or source text first."
             return
         }
         if (isRecording) return
@@ -120,7 +140,7 @@ fun SimultaneousScreen(
             clearFeedback()
             errorMessage = null
             isRecording = true
-            if (hasMedia) {
+            if (hasNativeMedia) {
                 sourceMedia.seekTo(0L)
                 sourceMedia.play()
             }
@@ -131,16 +151,14 @@ fun SimultaneousScreen(
     }
 
     fun finishInterpretation() {
-        if (hasMedia) sourceMedia.pause()
+        if (hasNativeMedia) sourceMedia.pause()
         recorder.stop()?.let { recordingPath = it.absolutePath }
-        if (recordingStartedAt > 0L) {
-            recordingElapsed = System.currentTimeMillis() - recordingStartedAt
-        }
+        if (recordingStartedAt > 0L) recordingElapsed = System.currentTimeMillis() - recordingStartedAt
         isRecording = false
     }
 
     fun generateLocalFeedback() {
-        val sourceDuration = if (hasMedia) {
+        val sourceDuration = if (hasNativeMedia) {
             sourceMedia.player.duration
                 .takeIf { it > 0L }
                 ?.let { (it / speed.coerceAtLeast(0.1f)).toLong() }
@@ -173,11 +191,11 @@ fun SimultaneousScreen(
         }
     }
 
-    LaunchedEffect(isRecording) {
+    LaunchedEffect(isRecording, hasNativeMedia) {
         while (isRecording) {
             recordingElapsed = System.currentTimeMillis() - recordingStartedAt
             if (
-                hasMedia &&
+                hasNativeMedia &&
                 sourceMedia.player.duration > 0L &&
                 sourceMedia.player.currentPosition >= sourceMedia.player.duration - 100L
             ) {
@@ -209,11 +227,8 @@ fun SimultaneousScreen(
                 modifier = Modifier.padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
+                ElevatedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -224,21 +239,13 @@ fun SimultaneousScreen(
                                 modifier = Modifier.size(46.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.Headphones,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
+                                    Icon(Icons.Default.Headphones, null, tint = MaterialTheme.colorScheme.primary)
                                 }
                             }
                             Column(Modifier.weight(1f)) {
+                                Text("Live simultaneous practice", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                                 Text(
-                                    "Live simultaneous practice",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    "Work from media and its source text while your interpretation is recorded.",
+                                    "Use local media, direct streams, YouTube/Vimeo or ordinary webpage links beside the source text.",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
@@ -247,40 +254,20 @@ fun SimultaneousScreen(
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                             if (maxWidth >= 620.dp) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Box(Modifier.weight(1f)) {
-                                        LanguageSelector("Source language", sourceLang) {
-                                            sourceLang = it
-                                            clearFeedback()
-                                        }
-                                    }
-                                    Box(Modifier.weight(1f)) {
-                                        LanguageSelector("Target language", targetLang) {
-                                            targetLang = it
-                                            clearFeedback()
-                                        }
-                                    }
+                                    Box(Modifier.weight(1f)) { LanguageSelector("Source language", sourceLang) { sourceLang = it; clearFeedback() } }
+                                    Box(Modifier.weight(1f)) { LanguageSelector("Target language", targetLang) { targetLang = it; clearFeedback() } }
                                 }
                             } else {
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    LanguageSelector("Source language", sourceLang) {
-                                        sourceLang = it
-                                        clearFeedback()
-                                    }
-                                    LanguageSelector("Target language", targetLang) {
-                                        targetLang = it
-                                        clearFeedback()
-                                    }
+                                    LanguageSelector("Source language", sourceLang) { sourceLang = it; clearFeedback() }
+                                    LanguageSelector("Target language", targetLang) { targetLang = it; clearFeedback() }
                                 }
                             }
                         }
                     }
                 }
 
-                Text(
-                    "Source workspace",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Text("Source workspace", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
 
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
                     if (maxWidth >= 760.dp) {
@@ -293,75 +280,52 @@ fun SimultaneousScreen(
                                 modifier = Modifier.weight(1.08f),
                                 sourceMedia = sourceMedia,
                                 sourceName = sourceName,
-                                hasMedia = hasMedia,
+                                hasNativeMedia = hasNativeMedia,
+                                webSourceUrl = webSourceUrl,
                                 mediaUrl = mediaUrl,
                                 onMediaUrlChange = { mediaUrl = it; errorMessage = null },
                                 onChooseMedia = { picker.launch(arrayOf("audio/*", "video/*")) },
                                 onLoadUrl = { loadNetworkSource() },
                                 speed = speed,
-                                onSpeedChange = {
-                                    speed = it
-                                    sourceMedia.setSpeed(it)
-                                    clearFeedback()
-                                },
+                                onSpeedChange = { speed = it; sourceMedia.setSpeed(it); clearFeedback() },
                                 enabled = !isRecording
                             )
                             SimultaneousTextPane(
                                 modifier = Modifier.weight(.92f),
                                 sourceText = sourceText,
-                                onSourceTextChange = {
-                                    sourceText = it
-                                    clearFeedback()
-                                    errorMessage = null
-                                },
+                                onSourceTextChange = { sourceText = it; clearFeedback(); errorMessage = null },
                                 enabled = !isRecording
                             )
                         }
                     } else {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                             SimultaneousMediaPane(
                                 modifier = Modifier.fillMaxWidth(),
                                 sourceMedia = sourceMedia,
                                 sourceName = sourceName,
-                                hasMedia = hasMedia,
+                                hasNativeMedia = hasNativeMedia,
+                                webSourceUrl = webSourceUrl,
                                 mediaUrl = mediaUrl,
                                 onMediaUrlChange = { mediaUrl = it; errorMessage = null },
                                 onChooseMedia = { picker.launch(arrayOf("audio/*", "video/*")) },
                                 onLoadUrl = { loadNetworkSource() },
                                 speed = speed,
-                                onSpeedChange = {
-                                    speed = it
-                                    sourceMedia.setSpeed(it)
-                                    clearFeedback()
-                                },
+                                onSpeedChange = { speed = it; sourceMedia.setSpeed(it); clearFeedback() },
                                 enabled = !isRecording
                             )
                             SimultaneousTextPane(
                                 modifier = Modifier.fillMaxWidth(),
                                 sourceText = sourceText,
-                                onSourceTextChange = {
-                                    sourceText = it
-                                    clearFeedback()
-                                    errorMessage = null
-                                },
+                                onSourceTextChange = { sourceText = it; clearFeedback(); errorMessage = null },
                                 enabled = !isRecording
                             )
                         }
                     }
                 }
 
-                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
+                ElevatedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Icon(
                                 if (isRecording) Icons.Default.Mic else Icons.Default.Headphones,
                                 contentDescription = null,
@@ -370,26 +334,29 @@ fun SimultaneousScreen(
                             Column(Modifier.weight(1f)) {
                                 Text("Interpretation booth", style = MaterialTheme.typography.titleMedium)
                                 Text(
-                                    if (isRecording) "Recording your interpretation • ${formatDuration(recordingElapsed)}"
-                                    else "Ready when you are",
+                                    if (isRecording) "Recording your interpretation • ${formatDuration(recordingElapsed)}" else "Ready when you are",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
 
-                        Text(
-                            "For clean recordings, use headphones so your microphone captures your voice instead of the source audio.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (hasWebSource) {
+                            Text(
+                                "This is a web-player link. Start or pause the source with the controls in the video pane; recording remains independent so the website cannot interrupt your microphone session.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Text(
+                                "For clean recordings, use headphones so your microphone captures your voice instead of the source audio.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
 
                         if (!isRecording) {
-                            Button(
-                                onClick = { requestStart() },
-                                enabled = hasSource,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.Mic, contentDescription = null)
+                            Button(onClick = { requestStart() }, enabled = hasSource, modifier = Modifier.fillMaxWidth()) {
+                                Icon(Icons.Default.Mic, null)
                                 Spacer(Modifier.width(8.dp))
                                 Text("Start interpreting")
                             }
@@ -402,7 +369,7 @@ fun SimultaneousScreen(
                                     contentColor = MaterialTheme.colorScheme.onError
                                 )
                             ) {
-                                Icon(Icons.Default.Stop, contentDescription = null)
+                                Icon(Icons.Default.Stop, null)
                                 Spacer(Modifier.width(8.dp))
                                 Text("Stop recording")
                             }
@@ -411,56 +378,39 @@ fun SimultaneousScreen(
                         recordingPath?.let { path ->
                             val file = File(path)
                             if (file.exists() && !isRecording) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     OutlinedButton(
                                         modifier = Modifier.weight(1f),
-                                        onClick = {
-                                            recordingMedia.load(Uri.fromFile(file))
-                                            recordingMedia.play()
-                                        }
+                                        onClick = { recordingMedia.load(Uri.fromFile(file)); recordingMedia.play() }
                                     ) {
-                                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                        Icon(Icons.Default.PlayArrow, null)
                                         Spacer(Modifier.width(6.dp))
                                         Text("Replay")
                                     }
-                                    OutlinedButton(
-                                        modifier = Modifier.weight(1f),
-                                        onClick = { recordingMedia.pause() }
-                                    ) { Text("Stop playback") }
+                                    OutlinedButton(modifier = Modifier.weight(1f), onClick = { recordingMedia.pause() }) {
+                                        Text("Stop playback")
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(Icons.Default.Description, contentDescription = null)
+                ElevatedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.Description, null)
                             Text("Transcription & review", style = MaterialTheme.typography.titleMedium)
                         }
 
                         OutlinedTextField(
                             value = interpretationTranscript,
-                            onValueChange = {
-                                interpretationTranscript = it
-                                clearFeedback()
-                            },
+                            onValueChange = { interpretationTranscript = it; clearFeedback() },
                             modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
                             label = { Text("Your interpretation transcript") },
                             placeholder = { Text("Paste or type what you interpreted") },
                             enabled = !isRecording
                         )
-
                         OutlinedTextField(
                             value = notes,
                             onValueChange = { notes = it },
@@ -474,50 +424,27 @@ fun SimultaneousScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 modifier = Modifier.weight(1f),
-                                enabled = !isRecording && (
-                                    recordingElapsed > 0L ||
-                                        sourceText.isNotBlank() ||
-                                        interpretationTranscript.isNotBlank()
-                                    ),
+                                enabled = !isRecording && (recordingElapsed > 0L || sourceText.isNotBlank() || interpretationTranscript.isNotBlank()),
                                 onClick = { generateLocalFeedback() }
                             ) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                                Icon(Icons.Default.AutoAwesome, null)
                                 Spacer(Modifier.width(6.dp))
                                 Text("Quick feedback")
                             }
-                            OutlinedButton(
-                                modifier = Modifier.weight(1f),
-                                onClick = onOpenAiCoach
-                            ) { Text("AI Coach") }
+                            OutlinedButton(modifier = Modifier.weight(1f), onClick = onOpenAiCoach) { Text("AI Coach") }
                         }
 
-                        errorMessage?.let {
-                            Text(it, color = MaterialTheme.colorScheme.error)
-                        }
-
+                        errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                         localScore?.let {
                             Text("Observable score: $it / 100", style = MaterialTheme.typography.titleMedium)
-                            LinearProgressIndicator(
-                                progress = { it / 100f },
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            LinearProgressIndicator(progress = { it / 100f }, modifier = Modifier.fillMaxWidth())
                         }
                         if (localFeedback.isNotBlank()) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                shape = MaterialTheme.shapes.large
-                            ) {
-                                Text(
-                                    localFeedback,
-                                    modifier = Modifier.padding(14.dp),
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
+                            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.large) {
+                                Text(localFeedback, modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
@@ -527,7 +454,7 @@ fun SimultaneousScreen(
                     enabled = hasSource && !isRecording,
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
-                        val mediaPosition = if (hasMedia) sourceMedia.player.currentPosition.coerceAtLeast(0L) else 0L
+                        val mediaPosition = if (hasNativeMedia) sourceMedia.player.currentPosition.coerceAtLeast(0L) else 0L
                         val duration = maxOf(mediaPosition, recordingElapsed)
                         sessionViewModel.save(
                             PracticeSessionEntity(
@@ -559,7 +486,8 @@ private fun SimultaneousMediaPane(
     modifier: Modifier,
     sourceMedia: MediaController,
     sourceName: String?,
-    hasMedia: Boolean,
+    hasNativeMedia: Boolean,
+    webSourceUrl: String?,
     mediaUrl: String,
     onMediaUrlChange: (String) -> Unit,
     onChooseMedia: () -> Unit,
@@ -568,36 +496,32 @@ private fun SimultaneousMediaPane(
     onSpeedChange: (Float) -> Unit,
     enabled: Boolean
 ) {
+    val hasWebSource = !webSourceUrl.isNullOrBlank()
+
     ElevatedCard(modifier = modifier) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(Icons.Default.VideoLibrary, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.VideoLibrary, null, tint = MaterialTheme.colorScheme.primary)
                 Column(Modifier.weight(1f)) {
                     Text("Video / audio", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Use a file from your phone or a direct media URL.",
+                        "Paste a normal video link, webpage link, direct stream, or choose a file from your phone.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            if (hasMedia) {
-                AndroidView(
+            when {
+                hasNativeMedia -> AndroidView(
                     factory = { PlayerView(it).apply { player = sourceMedia.player; useController = true } },
                     modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
                 )
-                sourceName?.let {
-                    Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                }
-            } else {
-                Surface(
+                hasWebSource -> EmbeddedWebSource(
+                    url = webSourceUrl!!,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                )
+                else -> Surface(
                     modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
                     shape = MaterialTheme.shapes.large,
                     color = MaterialTheme.colorScheme.surfaceVariant
@@ -607,49 +531,58 @@ private fun SimultaneousMediaPane(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        Icon(
-                            Icons.Default.VideoLibrary,
-                            contentDescription = null,
-                            modifier = Modifier.size(38.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Icon(Icons.Default.VideoLibrary, null, modifier = Modifier.size(38.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(8.dp))
-                        Text("Your source media will appear here")
+                        Text("Your source will appear here")
                     }
                 }
             }
 
-            FilledTonalButton(
-                onClick = onChooseMedia,
-                enabled = enabled,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Choose media from phone") }
+            sourceName?.let {
+                Text(
+                    if (hasWebSource) "$it • web player" else it,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            FilledTonalButton(onClick = onChooseMedia, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+                Text("Choose media from phone")
+            }
 
             OutlinedTextField(
                 value = mediaUrl,
                 onValueChange = onMediaUrlChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Direct media URL") },
-                placeholder = { Text("https://example.com/video.mp4") },
+                label = { Text("Media or webpage link") },
+                placeholder = { Text("youtube.com/watch?v=… or https://…/video.mp4") },
                 singleLine = true,
-                leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
+                leadingIcon = { Icon(Icons.Default.Link, null) },
                 enabled = enabled
             )
             OutlinedButton(
                 onClick = onLoadUrl,
                 enabled = enabled && mediaUrl.isNotBlank(),
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Load URL") }
+            ) { Text("Load link") }
 
-            Text("Playback speed", style = MaterialTheme.typography.labelLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                listOf(.75f, 1f, 1.25f).forEach { value ->
-                    FilterChip(
-                        selected = speed == value,
-                        enabled = enabled,
-                        onClick = { onSpeedChange(value) },
-                        label = { Text("${value}x") }
-                    )
+            if (hasWebSource) {
+                Text(
+                    "Use the controls inside the embedded page. Some websites may require sign-in or may block embedded playback; those restrictions come from the website itself.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text("Playback speed", style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    listOf(.75f, 1f, 1.25f).forEach { value ->
+                        FilterChip(
+                            selected = speed == value,
+                            enabled = enabled && hasNativeMedia,
+                            onClick = { onSpeedChange(value) },
+                            label = { Text("${value}x") }
+                        )
+                    }
                 }
             }
         }
@@ -664,15 +597,9 @@ private fun SimultaneousTextPane(
     enabled: Boolean
 ) {
     ElevatedCard(modifier = modifier) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Description, null, tint = MaterialTheme.colorScheme.primary)
                 Column(Modifier.weight(1f)) {
                     Text("Source text", style = MaterialTheme.typography.titleMedium)
                     Text(
@@ -682,7 +609,6 @@ private fun SimultaneousTextPane(
                     )
                 }
             }
-
             OutlinedTextField(
                 value = sourceText,
                 onValueChange = onSourceTextChange,
@@ -691,7 +617,6 @@ private fun SimultaneousTextPane(
                 placeholder = { Text("Paste the speaker transcript or source text here…") },
                 enabled = enabled
             )
-
             Text(
                 "You can also practice from text alone when no media is loaded.",
                 style = MaterialTheme.typography.bodySmall,

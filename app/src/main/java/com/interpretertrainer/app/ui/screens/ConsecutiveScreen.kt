@@ -18,6 +18,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.media.MediaController
+import com.interpretertrainer.app.media.MediaLinkResolver
 import com.interpretertrainer.app.model.LanguageOption
 import com.interpretertrainer.app.model.PracticeMode
 import com.interpretertrainer.app.util.formatDuration
@@ -29,6 +30,7 @@ fun ConsecutiveScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
     val context = LocalContext.current
     val media = remember { MediaController(context) }
     var sourceName by rememberSaveable { mutableStateOf<String?>(null) }
+    var webSourceUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var mediaUrl by rememberSaveable { mutableStateOf("") }
     var sourceError by rememberSaveable { mutableStateOf<String?>(null) }
     var segmentSeconds by rememberSaveable { mutableIntStateOf(30) }
@@ -40,12 +42,16 @@ fun ConsecutiveScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
     var targetLang by rememberSaveable { mutableStateOf(LanguageOption.FRENCH_FRANCE) }
     var position by remember { mutableLongStateOf(0L) }
 
+    val isWebSource = !webSourceUrl.isNullOrBlank()
+    val hasSource = sourceName != null
+    val hasNativeSource = hasSource && !isWebSource
+
     fun resetSegments() {
         media.pause()
         segmentIndex = 0
         segmentStart = 0L
         position = 0L
-        media.seekTo(0L)
+        if (hasNativeSource) media.seekTo(0L)
         sourceError = null
     }
 
@@ -53,31 +59,58 @@ fun ConsecutiveScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
         uri?.let {
             sourceName = it.lastPathSegment ?: "Local media"
             media.load(it)
+            webSourceUrl = null
             mediaUrl = ""
-            resetSegments()
+            segmentIndex = 0
+            segmentStart = 0L
+            position = 0L
+            sourceError = null
         }
     }
 
     fun loadNetworkSource() {
-        media.loadUrl(mediaUrl)
-            .onSuccess {
-                val uri = Uri.parse(mediaUrl.trim())
-                sourceName = uri.lastPathSegment?.takeIf { it.isNotBlank() } ?: "Online media"
-                resetSegments()
-            }
-            .onFailure {
-                sourceError = it.message ?: "Could not load that media URL."
-            }
+        val resolved = MediaLinkResolver.resolve(mediaUrl).getOrElse {
+            sourceError = it.message ?: "That link is not valid."
+            return
+        }
+
+        mediaUrl = resolved.normalizedUrl
+        media.pause()
+
+        if (resolved.usesNativePlayer) {
+            media.loadUrl(resolved.playbackUrl)
+                .onSuccess {
+                    sourceName = resolved.displayName
+                    webSourceUrl = null
+                    segmentIndex = 0
+                    segmentStart = 0L
+                    position = 0L
+                    sourceError = null
+                }
+                .onFailure {
+                    sourceError = it.message ?: "Could not load that direct media link."
+                }
+        } else {
+            media.clear()
+            sourceName = resolved.displayName
+            webSourceUrl = resolved.playbackUrl
+            segmentIndex = 0
+            segmentStart = 0L
+            position = 0L
+            sourceError = null
+        }
     }
 
-    LaunchedEffect(media.player, segmentSeconds, segmentStart) {
+    LaunchedEffect(media.player, segmentSeconds, segmentStart, isWebSource) {
         while (true) {
-            position = media.player.currentPosition
-            val boundary = segmentStart + segmentSeconds * 1000L
-            if (media.player.isPlaying && position >= boundary) {
-                media.pause()
-                media.seekTo(boundary)
-                position = boundary
+            if (!isWebSource) {
+                position = media.player.currentPosition
+                val boundary = segmentStart + segmentSeconds * 1000L
+                if (media.player.isPlaying && position >= boundary) {
+                    media.pause()
+                    media.seekTo(boundary)
+                    position = boundary
+                }
             }
             delay(100)
         }
@@ -86,12 +119,14 @@ fun ConsecutiveScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
     DisposableEffect(Unit) { onDispose { media.release() } }
 
     fun playCurrent() {
+        if (!hasNativeSource) return
         segmentStart = segmentIndex * segmentSeconds * 1000L
         media.seekTo(segmentStart)
         media.play()
     }
 
     fun playNext() {
+        if (!hasNativeSource) return
         val nextStart = (segmentIndex + 1) * segmentSeconds * 1000L
         val duration = media.player.duration
         if (duration <= 0 || nextStart < duration) {
@@ -121,34 +156,53 @@ fun ConsecutiveScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
                     value = mediaUrl,
                     onValueChange = { mediaUrl = it; sourceError = null },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Direct audio / video URL") },
-                    placeholder = { Text("https://example.com/audio.mp3") },
+                    label = { Text("Media or webpage link") },
+                    placeholder = { Text("youtube.com/watch?v=… or https://…/audio.mp3") },
                     singleLine = true,
                     leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) }
                 )
                 Button(onClick = { loadNetworkSource() }, enabled = mediaUrl.isNotBlank()) {
-                    Text("Load URL")
+                    Text("Load link")
                 }
                 Text(
-                    "Direct media and HLS/DASH stream links are supported; ordinary webpage links may not be directly playable.",
+                    "Direct files and HLS/DASH streams use the native player. YouTube, Vimeo and ordinary webpages open inside the app instead of being treated as broken media files.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 sourceError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                sourceName?.let { Text("Loaded: $it", style = MaterialTheme.typography.labelLarge) }
+                sourceName?.let {
+                    Text(
+                        "Loaded: $it${if (isWebSource) " • web player" else ""}",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
             }
 
-            AndroidView(
-                factory = { PlayerView(it).apply { player = media.player; useController = true } },
-                modifier = Modifier.fillMaxWidth().height(200.dp)
-            )
+            if (isWebSource) {
+                EmbeddedWebSource(
+                    url = webSourceUrl!!,
+                    modifier = Modifier.fillMaxWidth().height(240.dp)
+                )
+            } else {
+                AndroidView(
+                    factory = { PlayerView(it).apply { player = media.player; useController = true } },
+                    modifier = Modifier.fillMaxWidth().height(200.dp)
+                )
+            }
 
             SectionCard {
                 Text("Segment length", style = MaterialTheme.typography.titleMedium)
+                if (isWebSource) {
+                    Text(
+                        "Automatic 15/30/60-second seeking is available for local files and direct media streams. For webpage players, use the website's own playback controls while taking consecutive notes.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(15, 30, 60).forEach { seconds ->
                         FilterChip(
                             selected = segmentSeconds == seconds,
+                            enabled = !isWebSource,
                             onClick = {
                                 media.pause()
                                 segmentSeconds = seconds
@@ -161,27 +215,30 @@ fun ConsecutiveScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
                     }
                 }
                 Text(
-                    "Segment ${segmentIndex + 1} • ${formatDuration(segmentStart)} → ${formatDuration(segmentStart + segmentSeconds * 1000L)}",
+                    if (isWebSource) "Web-player mode"
+                    else "Segment ${segmentIndex + 1} • ${formatDuration(segmentStart)} → ${formatDuration(segmentStart + segmentSeconds * 1000L)}",
                     style = MaterialTheme.typography.titleSmall
                 )
-                LinearProgressIndicator(
-                    progress = {
-                        ((position - segmentStart).coerceAtLeast(0L).toFloat() / (segmentSeconds * 1000L))
-                            .coerceIn(0f, 1f)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (!isWebSource) {
+                    LinearProgressIndicator(
+                        progress = {
+                            ((position - segmentStart).coerceAtLeast(0L).toFloat() / (segmentSeconds * 1000L))
+                                .coerceIn(0f, 1f)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
-                        enabled = segmentIndex > 0 && sourceName != null,
+                        enabled = segmentIndex > 0 && hasNativeSource,
                         onClick = {
                             media.pause()
                             segmentIndex--
                             playCurrent()
                         }
                     ) { Text("Previous") }
-                    OutlinedButton(enabled = sourceName != null, onClick = { playCurrent() }) { Text("Replay") }
-                    Button(enabled = sourceName != null, onClick = { playNext() }) { Text("Next") }
+                    OutlinedButton(enabled = hasNativeSource, onClick = { playCurrent() }) { Text("Replay") }
+                    Button(enabled = hasNativeSource, onClick = { playNext() }) { Text("Next") }
                 }
             }
 
@@ -202,20 +259,21 @@ fun ConsecutiveScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
             )
 
             Button(
-                enabled = sourceName != null,
+                enabled = hasSource,
                 modifier = Modifier.fillMaxWidth(),
                 onClick = {
+                    val duration = if (isWebSource) 0L else position
                     sessionViewModel.save(
                         PracticeSessionEntity(
                             practiceMode = PracticeMode.CONSECUTIVE.name,
                             sourceLanguage = sourceLang.tag,
                             targetLanguage = targetLang.tag,
-                            startedAt = System.currentTimeMillis() - position,
-                            durationMillis = position,
+                            startedAt = System.currentTimeMillis() - duration,
+                            durationMillis = duration,
                             sourceName = sourceName,
                             transcript = transcript,
                             notes = notes,
-                            segmentDurationSeconds = segmentSeconds,
+                            segmentDurationSeconds = if (isWebSource) null else segmentSeconds,
                             status = "COMPLETED"
                         )
                     )

@@ -32,10 +32,10 @@ import com.interpretertrainer.app.media.MediaLinkResolver
 import com.interpretertrainer.app.media.ShadowingRecorder
 import com.interpretertrainer.app.model.LanguageOption
 import com.interpretertrainer.app.model.PracticeMode
+import com.interpretertrainer.app.speech.NaturalAndroidVoice
 import com.interpretertrainer.app.viewmodel.SessionViewModel
 import kotlinx.coroutines.delay
 import java.io.File
-import java.util.Locale
 
 @Composable
 fun ShadowingScreen(
@@ -74,16 +74,14 @@ fun ShadowingScreen(
     val hasWebSource = !webSourceUrl.isNullOrBlank()
     val hasSource = hasNativeMedia || hasWebSource || sourceText.isNotBlank()
 
-    fun localeFor(option: LanguageOption): Locale = when (option) {
-        LanguageOption.ARABIC_MOROCCO -> Locale("ar", "MA")
-        LanguageOption.FRENCH_FRANCE -> Locale.FRANCE
-        LanguageOption.ENGLISH_US -> Locale.US
-    }
-
     fun speakSourceText() {
         if (!ttsReady || sourceText.isBlank()) return
-        tts.language = localeFor(language)
-        tts.setSpeechRate(speed.coerceIn(.75f, 1.25f))
+        val configured = NaturalAndroidVoice.configure(tts, language, speed)
+        if (!configured) {
+            errorMessage = "A voice for ${language.label} is not installed on this device."
+            return
+        }
+        errorMessage = null
         tts.speak(sourceText, TextToSpeech.QUEUE_FLUSH, null, "shadow-source")
     }
 
@@ -218,12 +216,13 @@ fun ShadowingScreen(
             SectionCard {
                 Text("Shadowing language", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Shadow in Arabic, English or French. Source playback, AI text-to-speech and transcription all follow the selected language.",
+                    "Shadow in Arabic, English or French. Source playback, text voice and transcription all follow the selected language.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 LanguageSelector("Language", language) {
                     language = it
                     tts.stop()
+                    if (ttsReady) NaturalAndroidVoice.configure(tts, it, speed)
                 }
             }
 
@@ -261,7 +260,7 @@ fun ShadowingScreen(
                 if (sourceText.isNotBlank()) {
                     OutlinedButton(onClick = { if (tts.isSpeaking) tts.stop() else speakSourceText() }, enabled = ttsReady && !isRecording) {
                         Icon(Icons.Default.PlayArrow, null)
-                        Text(if (tts.isSpeaking) " Stop text voice" else " Play text voice")
+                        Text(if (tts.isSpeaking) " Stop text voice" else " Play natural text voice")
                     }
                 }
                 errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -288,6 +287,7 @@ fun ShadowingScreen(
                             onClick = {
                                 speed = value
                                 if (hasNativeMedia) sourceMedia.setSpeed(value)
+                                if (ttsReady) NaturalAndroidVoice.configure(tts, language, value)
                             },
                             label = { Text("${value}x") }
                         )

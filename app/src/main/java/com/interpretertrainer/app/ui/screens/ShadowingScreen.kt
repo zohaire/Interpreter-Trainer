@@ -8,11 +8,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Headphones
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -57,7 +57,6 @@ fun ShadowingScreen(
     var hasNativeMedia by rememberSaveable { mutableStateOf(false) }
     var speed by rememberSaveable { mutableFloatStateOf(1f) }
     var transcript by rememberSaveable { mutableStateOf("") }
-    var notes by rememberSaveable { mutableStateOf("") }
     var recordingPath by rememberSaveable { mutableStateOf<String?>(null) }
     var recordingStartedAt by rememberSaveable { mutableLongStateOf(0L) }
     var recordingElapsed by rememberSaveable { mutableLongStateOf(0L) }
@@ -73,6 +72,12 @@ fun ShadowingScreen(
 
     val hasWebSource = !webSourceUrl.isNullOrBlank()
     val hasSource = hasNativeMedia || hasWebSource || sourceText.isNotBlank()
+
+    fun applyLanguage(option: LanguageOption) {
+        language = option
+        tts.stop()
+        if (ttsReady) NaturalAndroidVoice.configure(tts, option, speed)
+    }
 
     fun speakSourceText() {
         if (!ttsReady || sourceText.isBlank()) return
@@ -100,6 +105,7 @@ fun ShadowingScreen(
             hasNativeMedia = false
             webSourceUrl = null
             mediaUrl = ""
+            transcript = ""
             errorMessage = null
             AiPracticeBridge.consume(payload.id)
         }
@@ -111,8 +117,10 @@ fun ShadowingScreen(
             sourceMedia.load(it)
             sourceName = it.lastPathSegment ?: "Local media"
             hasNativeMedia = true
+            sourceText = ""
             webSourceUrl = null
             mediaUrl = ""
+            transcript = ""
             errorMessage = null
         }
     }
@@ -124,12 +132,14 @@ fun ShadowingScreen(
         }
         stopSource()
         mediaUrl = resolved.normalizedUrl
+        sourceText = ""
         if (resolved.usesNativePlayer) {
             sourceMedia.loadUrl(resolved.playbackUrl)
                 .onSuccess {
                     sourceName = resolved.displayName
                     hasNativeMedia = true
                     webSourceUrl = null
+                    transcript = ""
                     errorMessage = null
                 }
                 .onFailure { errorMessage = it.message ?: "Could not load that media link." }
@@ -138,6 +148,7 @@ fun ShadowingScreen(
             sourceName = resolved.displayName
             hasNativeMedia = false
             webSourceUrl = resolved.playbackUrl
+            transcript = ""
             errorMessage = null
         }
     }
@@ -176,7 +187,7 @@ fun ShadowingScreen(
 
     fun requestRecording() {
         if (!hasSource) {
-            errorMessage = "Add audio/video or AI/source text first."
+            errorMessage = "Add audio, video, a link or source text first."
             return
         }
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -209,76 +220,72 @@ fun ShadowingScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            SectionCard {
-                Text("Shadowing language", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Shadow in Arabic, English or French. Source playback, text voice and transcription all follow the selected language.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                LanguageSelector("Language", language) {
-                    language = it
-                    tts.stop()
-                    if (ttsReady) NaturalAndroidVoice.configure(tts, it, speed)
-                }
-            }
+            PracticeTopStrip(
+                sourceLanguage = language,
+                targetLanguage = language,
+                onSourceLanguageChange = ::applyLanguage,
+                onTargetLanguageChange = ::applyLanguage
+            )
 
             SectionCard {
-                Text("Source", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { picker.launch(arrayOf("audio/*", "video/*")) }, enabled = !isRecording) {
-                        Text("Choose media")
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("Shadowing source", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            sourceName ?: "Choose media, paste a link or use AI text",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                    OutlinedButton(onClick = onOpenAiCoach, enabled = !isRecording) {
-                        Icon(Icons.Default.AutoAwesome, null)
-                        Text(" AI Coach")
-                    }
+                    AssistChip(onClick = {}, label = { Text("${speed}×") })
                 }
-                OutlinedTextField(
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ModernActionButton(
+                        text = "Media",
+                        icon = Icons.Default.Headphones,
+                        onClick = { picker.launch(arrayOf("audio/*", "video/*")) },
+                        enabled = !isRecording,
+                        modifier = Modifier.weight(1f)
+                    )
+                    ModernActionButton(
+                        text = "AI",
+                        icon = Icons.Default.AutoAwesome,
+                        onClick = onOpenAiCoach,
+                        enabled = !isRecording,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                CompactMediaLinkField(
                     value = mediaUrl,
                     onValueChange = { mediaUrl = it; errorMessage = null },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Media or webpage link") },
-                    leadingIcon = { Icon(Icons.Default.Link, null) },
-                    enabled = !isRecording,
-                    singleLine = true
-                )
-                OutlinedButton(onClick = { loadNetworkSource() }, enabled = !isRecording && mediaUrl.isNotBlank()) {
-                    Text("Load link")
-                }
-                OutlinedTextField(
-                    value = sourceText,
-                    onValueChange = { sourceText = it },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp),
-                    label = { Text("Source / AI practice text") },
-                    placeholder = { Text("In AI Coach, tap “Use in Shadowing” to put generated material here") },
+                    onLoad = { loadNetworkSource() },
                     enabled = !isRecording
                 )
-                if (sourceText.isNotBlank()) {
-                    OutlinedButton(onClick = { if (tts.isSpeaking) tts.stop() else speakSourceText() }, enabled = ttsReady && !isRecording) {
-                        Icon(Icons.Default.PlayArrow, null)
-                        Text(if (tts.isSpeaking) " Stop text voice" else " Play natural text voice")
-                    }
-                }
-                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            }
 
-            when {
-                hasNativeMedia -> AndroidView(
-                    factory = { PlayerView(it).apply { player = sourceMedia.player; useController = true } },
-                    modifier = Modifier.fillMaxWidth().height(210.dp)
+                OutlinedTextField(
+                    value = sourceText,
+                    onValueChange = {
+                        sourceText = it
+                        if (it.isNotBlank()) {
+                            stopSource()
+                            sourceMedia.clear()
+                            hasNativeMedia = false
+                            webSourceUrl = null
+                            sourceName = "Source text"
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
+                    placeholder = { Text("Paste text or send a passage from Interpreter AI") },
+                    enabled = !isRecording,
+                    shape = RoundedCornerShape(18.dp)
                 )
-                hasWebSource -> EmbeddedWebSource(
-                    url = webSourceUrl!!,
-                    modifier = Modifier.fillMaxWidth().height(230.dp)
-                )
-            }
 
-            SectionCard {
-                Text("Playback speed", style = MaterialTheme.typography.titleMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(.75f, 1f, 1.25f).forEach { value ->
                         FilterChip(
@@ -289,38 +296,75 @@ fun ShadowingScreen(
                                 if (hasNativeMedia) sourceMedia.setSpeed(value)
                                 if (ttsReady) NaturalAndroidVoice.configure(tts, language, value)
                             },
-                            label = { Text("${value}x") }
+                            label = { Text("${value}×") }
                         )
                     }
                 }
+
+                if (sourceText.isNotBlank()) {
+                    FilledTonalButton(
+                        onClick = { if (tts.isSpeaking) tts.stop() else speakSourceText() },
+                        enabled = ttsReady && !isRecording,
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Icon(Icons.Default.PlayArrow, null)
+                        Text(if (tts.isSpeaking) " Stop voice" else " Play source voice")
+                    }
+                }
+                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+
+            when {
+                hasNativeMedia -> AndroidView(
+                    factory = { PlayerView(it).apply { player = sourceMedia.player; useController = true } },
+                    modifier = Modifier.fillMaxWidth().height(205.dp)
+                )
+                hasWebSource -> EmbeddedWebSource(
+                    url = webSourceUrl!!,
+                    modifier = Modifier.fillMaxWidth().height(225.dp)
+                )
             }
 
             SectionCard {
-                Text("Shadowing recording", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    if (isRecording) "Recording… ${recordingElapsed / 1000}s" else "Record your shadowing voice for replay and review.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Shadow", style = MaterialTheme.typography.titleMedium)
+                    AssistChip(
+                        onClick = {},
+                        label = { Text(if (isRecording) "${recordingElapsed / 1000}s" else "Ready") },
+                        leadingIcon = {
+                            Icon(
+                                if (isRecording) Icons.Default.Mic else Icons.Default.Headphones,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    )
+                }
                 Button(
                     onClick = { if (isRecording) stopRecording() else requestRecording() },
                     enabled = hasSource,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp)
                 ) {
                     Icon(if (isRecording) Icons.Default.Stop else Icons.Default.Mic, null)
-                    Text(if (isRecording) " Stop recording" else " Start shadowing")
+                    Text(if (isRecording) " Stop shadowing" else " Start shadowing")
                 }
+
                 recordingPath?.let { path ->
                     val file = File(path)
                     if (file.exists() && !isRecording) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = {
-                                recordingMedia.load(Uri.fromFile(file))
-                                recordingMedia.play()
-                            }) {
-                                Icon(Icons.Default.Headphones, null)
+                            FilledTonalButton(
+                                onClick = {
+                                    recordingMedia.load(Uri.fromFile(file))
+                                    recordingMedia.play()
+                                },
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, null)
                                 Text(" Replay")
                             }
-                            OutlinedButton(onClick = { recordingMedia.pause() }) { Text("Stop replay") }
+                            TextButton(onClick = { recordingMedia.pause() }) { Text("Stop replay") }
                         }
                     }
                 }
@@ -328,23 +372,16 @@ fun ShadowingScreen(
 
             PracticeTranscriptionPanel(
                 language = language,
-                onLanguageChange = { language = it },
                 transcript = transcript,
                 onTranscriptChange = { transcript = it },
                 enabled = !isRecording,
                 title = "Shadowing transcription"
             )
 
-            OutlinedTextField(
-                value = notes,
-                onValueChange = { notes = it },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
-                label = { Text("Practice notes") }
-            )
-
             Button(
                 enabled = hasSource && !isRecording,
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
                 onClick = {
                     val duration = maxOf(recordingElapsed, if (hasNativeMedia) sourceMedia.player.currentPosition.coerceAtLeast(0L) else 0L)
                     sessionViewModel.save(
@@ -356,16 +393,16 @@ fun ShadowingScreen(
                             durationMillis = duration,
                             sourceName = sourceName ?: if (sourceText.isNotBlank()) "Shadowing source text" else null,
                             transcript = transcript,
-                            notes = notes,
+                            notes = "",
                             segmentDurationSeconds = null,
                             status = "COMPLETED",
                             recordingPath = recordingPath
                         )
                     )
                 }
-            ) { Text("Save shadowing session") }
+            ) { Text("Save session") }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
         }
     }
 }

@@ -82,11 +82,7 @@ fun PracticeTranscriptionPanel(
                 onClick = {},
                 label = { Text(if (state.isListening) "Listening" else language.tag) },
                 leadingIcon = {
-                    Icon(
-                        if (state.isListening) Icons.Default.Mic else Icons.Default.Mic,
-                        contentDescription = null,
-                        modifier = Modifier.heightIn(max = 18.dp)
-                    )
+                    Icon(Icons.Default.Mic, contentDescription = null)
                 }
             )
         }

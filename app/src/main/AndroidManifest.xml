@@ -7,6 +7,12 @@
         android:name="android.hardware.microphone"
         android:required="false" />
 
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:name=".InterpreterTrainerApplication"
         android:allowBackup="true"

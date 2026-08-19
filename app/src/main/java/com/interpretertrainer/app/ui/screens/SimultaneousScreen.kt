@@ -7,11 +7,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Headphones
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -25,7 +25,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.media3.ui.PlayerView
 import com.interpretertrainer.app.ai.AiPracticeBridge
-import com.interpretertrainer.app.ai.LocalInterpreterCoach
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.media.MediaController
 import com.interpretertrainer.app.media.MediaLinkResolver
@@ -55,30 +54,22 @@ fun SimultaneousScreen(
     var mediaUrl by rememberSaveable { mutableStateOf("") }
     var sourceText by rememberSaveable { mutableStateOf("") }
     var interpretationTranscript by rememberSaveable { mutableStateOf("") }
-    var notes by rememberSaveable { mutableStateOf("") }
     var speed by rememberSaveable { mutableFloatStateOf(1f) }
     var sourceLang by rememberSaveable { mutableStateOf(LanguageOption.ENGLISH_US) }
     var targetLang by rememberSaveable { mutableStateOf(LanguageOption.ARABIC_MOROCCO) }
     var recordingPath by rememberSaveable { mutableStateOf<String?>(null) }
     var recordingElapsed by rememberSaveable { mutableLongStateOf(0L) }
     var recordingStartedAt by rememberSaveable { mutableLongStateOf(0L) }
-    var localFeedback by rememberSaveable { mutableStateOf("") }
-    var localScore by rememberSaveable { mutableStateOf<Int?>(null) }
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var isRecording by remember { mutableStateOf(false) }
 
     val hasWebSource = !webSourceUrl.isNullOrBlank()
     val hasSource = hasNativeMedia || hasWebSource || sourceText.isNotBlank()
 
-    fun clearFeedback() {
-        localFeedback = ""
-        localScore = null
-    }
-
     fun resetPracticeForNewSource() {
         recordingElapsed = 0L
         recordingPath = null
-        clearFeedback()
+        interpretationTranscript = ""
         errorMessage = null
     }
 
@@ -104,6 +95,7 @@ fun SimultaneousScreen(
             hasNativeMedia = true
             webSourceUrl = null
             mediaUrl = ""
+            sourceText = ""
             resetPracticeForNewSource()
         }
     }
@@ -122,6 +114,7 @@ fun SimultaneousScreen(
                     sourceName = resolved.displayName
                     hasNativeMedia = true
                     webSourceUrl = null
+                    sourceText = ""
                     resetPracticeForNewSource()
                 }
                 .onFailure { errorMessage = it.message ?: "Could not load that media link." }
@@ -130,23 +123,22 @@ fun SimultaneousScreen(
             sourceName = resolved.displayName
             hasNativeMedia = false
             webSourceUrl = resolved.playbackUrl
+            sourceText = ""
             resetPracticeForNewSource()
         }
     }
 
     fun beginInterpretation() {
         if (!hasSource) {
-            errorMessage = "Add a video/audio source, webpage or source text first."
+            errorMessage = "Add a source first."
             return
         }
         if (isRecording) return
-
         runCatching {
             recordingMedia.pause()
             recordingPath = recorder.start().absolutePath
             recordingStartedAt = System.currentTimeMillis()
             recordingElapsed = 0L
-            clearFeedback()
             errorMessage = null
             isRecording = true
             if (hasNativeMedia) {
@@ -178,25 +170,6 @@ fun SimultaneousScreen(
         }
     }
 
-    fun generateLocalFeedback() {
-        val sourceDuration = if (hasNativeMedia) {
-            sourceMedia.player.duration.takeIf { it > 0L }?.let { (it / speed.coerceAtLeast(.1f)).toLong() }
-        } else null
-
-        val report = LocalInterpreterCoach.analyze(
-            mode = PracticeMode.SIMULTANEOUS_INTERPRETATION,
-            sourceText = sourceText,
-            traineeText = interpretationTranscript,
-            sourceLanguage = sourceLang.tag,
-            targetLanguage = targetLang.tag,
-            sourceDurationMillis = sourceDuration,
-            traineeDurationMillis = recordingElapsed.takeIf { it > 0L }
-        )
-        localScore = report.overallScore
-        localFeedback = report.asPlainText()
-        errorMessage = null
-    }
-
     LaunchedEffect(isRecording, hasNativeMedia) {
         while (isRecording) {
             recordingElapsed = System.currentTimeMillis() - recordingStartedAt
@@ -221,57 +194,81 @@ fun SimultaneousScreen(
         }
     }
 
-    TrainerScaffold("Simultaneous Interpretation", onBack) { padding ->
+    TrainerScaffold("Simultaneous", onBack) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            SectionCard {
-                Text("Languages", style = MaterialTheme.typography.titleMedium)
-                LanguageSelector("Source language", sourceLang) { sourceLang = it; clearFeedback() }
-                LanguageSelector("Target language", targetLang) { targetLang = it; clearFeedback() }
-            }
+            PracticeTopStrip(
+                sourceLanguage = sourceLang,
+                targetLanguage = targetLang,
+                onSourceLanguageChange = { sourceLang = it },
+                onTargetLanguageChange = { targetLang = it }
+            )
 
             SectionCard {
-                Text("Source workspace", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { picker.launch(arrayOf("audio/*", "video/*")) }, enabled = !isRecording) {
-                        Text("Choose media")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("Source", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            sourceName ?: "Media, link, text or AI material",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                    OutlinedButton(onClick = onOpenAiCoach, enabled = !isRecording) {
-                        Icon(Icons.Default.AutoAwesome, null)
-                        Text(" AI Coach")
-                    }
+                    AssistChip(
+                        onClick = {},
+                        label = { Text("${speed}×") }
+                    )
                 }
 
-                OutlinedTextField(
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ModernActionButton(
+                        text = "Media",
+                        icon = Icons.Default.Headphones,
+                        onClick = { picker.launch(arrayOf("audio/*", "video/*")) },
+                        enabled = !isRecording,
+                        modifier = Modifier.weight(1f)
+                    )
+                    ModernActionButton(
+                        text = "AI",
+                        icon = Icons.Default.AutoAwesome,
+                        onClick = onOpenAiCoach,
+                        enabled = !isRecording,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                CompactMediaLinkField(
                     value = mediaUrl,
                     onValueChange = { mediaUrl = it; errorMessage = null },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Media or webpage link") },
-                    placeholder = { Text("youtube.com/watch?v=… or https://…/video.mp4") },
-                    leadingIcon = { Icon(Icons.Default.Link, null) },
-                    enabled = !isRecording,
-                    singleLine = true
-                )
-                OutlinedButton(onClick = { loadNetworkSource() }, enabled = !isRecording && mediaUrl.isNotBlank()) {
-                    Text("Load link")
-                }
-
-                OutlinedTextField(
-                    value = sourceText,
-                    onValueChange = { sourceText = it; clearFeedback() },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 170.dp),
-                    label = { Text("Source transcript / AI text") },
-                    placeholder = { Text("Paste source text or use “Use in Simultaneous” in AI Coach") },
+                    onLoad = { loadNetworkSource() },
                     enabled = !isRecording
                 )
 
-                Text("Playback speed", style = MaterialTheme.typography.labelLarge)
+                OutlinedTextField(
+                    value = sourceText,
+                    onValueChange = {
+                        sourceText = it
+                        if (it.isNotBlank()) {
+                            hasNativeMedia = false
+                            webSourceUrl = null
+                            sourceName = "Source text"
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp),
+                    placeholder = { Text("Paste a speech or send material from Interpreter AI") },
+                    enabled = !isRecording,
+                    shape = RoundedCornerShape(18.dp)
+                )
+
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(.75f, 1f, 1.25f).forEach { value ->
                         FilterChip(
@@ -281,7 +278,7 @@ fun SimultaneousScreen(
                                 speed = value
                                 if (hasNativeMedia) sourceMedia.setSpeed(value)
                             },
-                            label = { Text("${value}x") }
+                            label = { Text("${value}×") }
                         )
                     }
                 }
@@ -291,41 +288,58 @@ fun SimultaneousScreen(
             when {
                 hasNativeMedia -> AndroidView(
                     factory = { PlayerView(it).apply { player = sourceMedia.player; useController = true } },
-                    modifier = Modifier.fillMaxWidth().height(220.dp)
+                    modifier = Modifier.fillMaxWidth().height(215.dp)
                 )
                 hasWebSource -> EmbeddedWebSource(
                     url = webSourceUrl!!,
-                    modifier = Modifier.fillMaxWidth().height(240.dp)
+                    modifier = Modifier.fillMaxWidth().height(230.dp)
                 )
             }
 
             SectionCard {
-                Text("Interpretation booth", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    if (isRecording) "Recording • ${formatDuration(recordingElapsed)}" else "Use headphones and start when the source is ready.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Interpret", style = MaterialTheme.typography.titleMedium)
+                    AssistChip(
+                        onClick = {},
+                        label = { Text(if (isRecording) formatDuration(recordingElapsed) else "Ready") },
+                        leadingIcon = {
+                            Icon(
+                                if (isRecording) Icons.Default.Mic else Icons.Default.Headphones,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    )
+                }
+
                 Button(
                     onClick = { if (isRecording) finishInterpretation() else requestStart() },
                     enabled = hasSource,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp)
                 ) {
                     Icon(if (isRecording) Icons.Default.Stop else Icons.Default.Mic, null)
-                    Text(if (isRecording) " Stop interpreting" else " Start interpreting")
+                    Text(if (isRecording) " Stop interpretation" else " Start interpretation")
                 }
 
                 recordingPath?.let { path ->
                     val file = File(path)
                     if (file.exists() && !isRecording) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = {
-                                recordingMedia.load(Uri.fromFile(file))
-                                recordingMedia.play()
-                            }) {
+                            FilledTonalButton(
+                                onClick = {
+                                    recordingMedia.load(Uri.fromFile(file))
+                                    recordingMedia.play()
+                                },
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
                                 Icon(Icons.Default.PlayArrow, null)
                                 Text(" Replay")
                             }
-                            OutlinedButton(onClick = { recordingMedia.pause() }) { Text("Stop replay") }
+                            TextButton(onClick = { recordingMedia.pause() }) { Text("Stop replay") }
                         }
                     }
                 }
@@ -333,46 +347,16 @@ fun SimultaneousScreen(
 
             PracticeTranscriptionPanel(
                 language = targetLang,
-                onLanguageChange = { targetLang = it; clearFeedback() },
                 transcript = interpretationTranscript,
-                onTranscriptChange = { interpretationTranscript = it; clearFeedback() },
+                onTranscriptChange = { interpretationTranscript = it },
                 enabled = !isRecording,
-                title = "Simultaneous interpretation transcription"
+                title = "Live target transcription"
             )
-
-            SectionCard {
-                Text("Review", style = MaterialTheme.typography.titleMedium)
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp),
-                    label = { Text("Practice notes") }
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { generateLocalFeedback() },
-                        enabled = !isRecording && (sourceText.isNotBlank() || interpretationTranscript.isNotBlank() || recordingElapsed > 0L),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.AutoAwesome, null)
-                        Text(" Quick feedback")
-                    }
-                    OutlinedButton(onClick = onOpenAiCoach, modifier = Modifier.weight(1f)) {
-                        Text("AI Coach")
-                    }
-                }
-                localScore?.let {
-                    Text("Observable score: $it / 100", style = MaterialTheme.typography.titleSmall)
-                    LinearProgressIndicator(progress = { it / 100f }, modifier = Modifier.fillMaxWidth())
-                }
-                if (localFeedback.isNotBlank()) {
-                    Text(localFeedback, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
 
             Button(
                 enabled = hasSource && !isRecording,
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
                 onClick = {
                     val mediaPosition = if (hasNativeMedia) sourceMedia.player.currentPosition.coerceAtLeast(0L) else 0L
                     val duration = maxOf(mediaPosition, recordingElapsed)
@@ -385,17 +369,17 @@ fun SimultaneousScreen(
                             durationMillis = duration,
                             sourceName = sourceName ?: if (sourceText.isNotBlank()) "Source text" else null,
                             transcript = interpretationTranscript,
-                            notes = notes,
+                            notes = "",
                             segmentDurationSeconds = null,
                             status = "COMPLETED",
                             recordingPath = recordingPath,
-                            aiFeedback = localFeedback.ifBlank { null }
+                            aiFeedback = null
                         )
                     )
                 }
-            ) { Text("Save simultaneous session") }
+            ) { Text("Save session") }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
         }
     }
 }

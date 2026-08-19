@@ -104,14 +104,21 @@ fun HomeScreen(
             item {
                 TrainingCard(
                     "Simultaneous Interpretation",
-                    "Interpret from video/audio with the source text beside it, record your delivery and review the transcript.",
+                    "Interpret from video/audio or source text, record your delivery, and transcribe in Arabic, English or French.",
                     Icons.Default.Headphones
                 ) { onNavigate(Routes.SIMULTANEOUS) }
             }
             item {
                 TrainingCard(
+                    "Shadowing",
+                    "Shadow Arabic, English or French from media or AI text, record yourself, and review a live transcript.",
+                    Icons.Default.RecordVoiceOver
+                ) { onNavigate(Routes.SHADOWING) }
+            }
+            item {
+                TrainingCard(
                     "Consecutive Interpretation",
-                    "Work through reliable 15, 30 or 60 second source segments.",
+                    "Work through source segments or AI practice text with integrated three-language transcription.",
                     Icons.Default.SkipNext
                 ) { onNavigate(Routes.CONSECUTIVE) }
             }
@@ -126,7 +133,7 @@ fun HomeScreen(
             item {
                 Text("Coach & review", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
             }
-            item { TrainingCard("Interpreter Coach", "Chat with online Qwen and evaluate a performance without downloading an AI model.", Icons.Default.AutoAwesome) { onNavigate(Routes.AI_COACH) } }
+            item { TrainingCard("Interpreter Coach", "Use faster streaming AI, voice chat, practice-text handoff and performance evaluation.", Icons.Default.AutoAwesome) { onNavigate(Routes.AI_COACH) } }
             item { TrainingCard("Practice History", "Review saved sessions, transcripts, recordings, notes and feedback.", Icons.Default.History) { onNavigate(Routes.HISTORY) } }
 
             item {

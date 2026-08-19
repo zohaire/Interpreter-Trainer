@@ -42,8 +42,20 @@ fun InterpreterTrainerApp(
                 onOpenAiCoach = { navController.navigate(Routes.AI_COACH) }
             )
         }
-        composable(Routes.CONSECUTIVE) { ConsecutiveScreen(onBack = navController::popBackStack, sessionViewModel) }
-        composable(Routes.TRANSCRIPTION) { LiveTranscriptionScreen(onBack = navController::popBackStack, sessionViewModel) }
+        composable(Routes.CONSECUTIVE) {
+            ConsecutiveScreen(
+                onBack = navController::popBackStack,
+                sessionViewModel = sessionViewModel,
+                onOpenAiCoach = { navController.navigate(Routes.AI_COACH) }
+            )
+        }
+        composable(Routes.TRANSCRIPTION) {
+            LiveTranscriptionScreen(
+                onBack = navController::popBackStack,
+                sessionViewModel = sessionViewModel,
+                onOpenAiCoach = { navController.navigate(Routes.AI_COACH) }
+            )
+        }
         composable(Routes.AI_COACH) {
             AiCoachScreen(
                 onBack = navController::popBackStack,

@@ -5,9 +5,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -54,6 +56,14 @@ fun ConsecutiveScreen(
     val hasSource = sourceName != null || hasAiSource
     val hasNativeSource = sourceName != null && !isWebSource && !hasAiSource
 
+    fun resetSegments() {
+        segmentIndex = 0
+        segmentStart = 0L
+        position = 0L
+        transcript = ""
+        sourceError = null
+    }
+
     LaunchedEffect(aiPayload?.id) {
         val payload = aiPayload
         if (payload != null && payload.mode == AiPracticeBridge.MODE_CONSECUTIVE) {
@@ -63,10 +73,7 @@ fun ConsecutiveScreen(
             sourceName = null
             webSourceUrl = null
             mediaUrl = ""
-            segmentIndex = 0
-            segmentStart = 0L
-            position = 0L
-            sourceError = null
+            resetSegments()
             AiPracticeBridge.consume(payload.id)
         }
     }
@@ -78,10 +85,7 @@ fun ConsecutiveScreen(
             aiSourceText = ""
             webSourceUrl = null
             mediaUrl = ""
-            segmentIndex = 0
-            segmentStart = 0L
-            position = 0L
-            sourceError = null
+            resetSegments()
         }
     }
 
@@ -90,7 +94,6 @@ fun ConsecutiveScreen(
             sourceError = it.message ?: "That link is not valid."
             return
         }
-
         mediaUrl = resolved.normalizedUrl
         media.pause()
         aiSourceText = ""
@@ -100,26 +103,18 @@ fun ConsecutiveScreen(
                 .onSuccess {
                     sourceName = resolved.displayName
                     webSourceUrl = null
-                    segmentIndex = 0
-                    segmentStart = 0L
-                    position = 0L
-                    sourceError = null
+                    resetSegments()
                 }
-                .onFailure {
-                    sourceError = it.message ?: "Could not load that direct media link."
-                }
+                .onFailure { sourceError = it.message ?: "Could not load that media link." }
         } else {
             media.clear()
             sourceName = resolved.displayName
             webSourceUrl = resolved.playbackUrl
-            segmentIndex = 0
-            segmentStart = 0L
-            position = 0L
-            sourceError = null
+            resetSegments()
         }
     }
 
-    LaunchedEffect(media.player, segmentSeconds, segmentStart, isWebSource) {
+    LaunchedEffect(media.player, segmentSeconds, segmentStart, isWebSource, hasAiSource) {
         while (true) {
             if (!isWebSource && !hasAiSource) {
                 position = media.player.currentPosition
@@ -155,104 +150,109 @@ fun ConsecutiveScreen(
         }
     }
 
-    TrainerScaffold("Consecutive Interpretation", onBack) { padding ->
+    TrainerScaffold("Consecutive", onBack) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            PracticeTopStrip(
+                sourceLanguage = sourceLang,
+                targetLanguage = targetLang,
+                onSourceLanguageChange = { sourceLang = it },
+                onTargetLanguageChange = { targetLang = it }
+            )
+
             SectionCard {
-                Text("AI practice text", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Ask Interpreter AI for a speech, briefing or passage, then tap “Use in Consecutive” under its answer. The text will appear here automatically.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("Source", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            sourceName ?: if (hasAiSource) "Interpreter AI text" else "Media, link or AI passage",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (hasSource) AssistChip(onClick = {}, label = { Text(if (hasAiSource) "AI text" else if (isWebSource) "Web" else "Media") })
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ModernActionButton(
+                        text = "Media",
+                        icon = Icons.Default.Headphones,
+                        onClick = { picker.launch(arrayOf("audio/*", "video/*")) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    ModernActionButton(
+                        text = "AI",
+                        icon = Icons.Default.AutoAwesome,
+                        onClick = onOpenAiCoach,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                CompactMediaLinkField(
+                    value = mediaUrl,
+                    onValueChange = { mediaUrl = it; sourceError = null },
+                    onLoad = { loadNetworkSource() }
                 )
-                OutlinedButton(onClick = onOpenAiCoach) { Text("Open AI Coach") }
+
                 OutlinedTextField(
                     value = aiSourceText,
                     onValueChange = {
                         aiSourceText = it
                         if (it.isNotBlank()) {
                             media.pause()
+                            media.clear()
                             sourceName = null
                             webSourceUrl = null
                         }
                     },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp),
-                    label = { Text("Source practice text") },
-                    placeholder = { Text("AI-generated consecutive interpreting material will appear here") }
-                )
-            }
-
-            SectionCard {
-                Text("Source media", style = MaterialTheme.typography.titleMedium)
-                Button(onClick = { picker.launch(arrayOf("audio/*", "video/*")) }) {
-                    Text("Choose from phone")
-                }
-                Text("or", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(
-                    value = mediaUrl,
-                    onValueChange = { mediaUrl = it; sourceError = null },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Media or webpage link") },
-                    placeholder = { Text("youtube.com/watch?v=… or https://…/audio.mp3") },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) }
-                )
-                Button(onClick = { loadNetworkSource() }, enabled = mediaUrl.isNotBlank()) {
-                    Text("Load link")
-                }
-                Text(
-                    "Direct files and HLS/DASH streams use the native player. YouTube, Vimeo and ordinary webpages open inside the app instead of being treated as broken media files.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
+                    placeholder = { Text("Paste a source or send a passage from Interpreter AI") },
+                    shape = RoundedCornerShape(18.dp)
                 )
                 sourceError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                sourceName?.let {
-                    Text(
-                        "Loaded: $it${if (isWebSource) " • web player" else ""}",
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                }
             }
 
-            if (hasAiSource) {
-                SectionCard {
-                    Text("Text-source practice", style = MaterialTheme.typography.titleMedium)
+            when {
+                hasAiSource -> SectionCard {
+                    Text("Text practice", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Use the AI text above as your consecutive source. Media segmentation is paused while a text source is active.",
+                        "Work paragraph by paragraph. The segment player stays out of the way while AI text is active.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-            } else if (isWebSource) {
-                EmbeddedWebSource(
+                isWebSource -> EmbeddedWebSource(
                     url = webSourceUrl!!,
-                    modifier = Modifier.fillMaxWidth().height(240.dp)
+                    modifier = Modifier.fillMaxWidth().height(225.dp)
                 )
-            } else {
-                AndroidView(
+                else -> AndroidView(
                     factory = { PlayerView(it).apply { player = media.player; useController = true } },
-                    modifier = Modifier.fillMaxWidth().height(200.dp)
+                    modifier = Modifier.fillMaxWidth().height(195.dp)
                 )
             }
 
             SectionCard {
-                Text("Segment length", style = MaterialTheme.typography.titleMedium)
-                if (isWebSource) {
-                    Text(
-                        "Automatic 15/30/60-second seeking is available for local files and direct media streams. For webpage players, use the website's own playback controls while taking consecutive notes.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else if (hasAiSource) {
-                    Text(
-                        "Segment controls are for media sources. With an AI text source, work paragraph by paragraph and use the notes field below.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Segments", style = MaterialTheme.typography.titleMedium)
+                    AssistChip(
+                        onClick = {},
+                        label = {
+                            Text(
+                                when {
+                                    hasAiSource -> "Text"
+                                    isWebSource -> "Web"
+                                    else -> "${segmentSeconds}s"
+                                }
+                            )
+                        }
                     )
                 }
+
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(15, 30, 60).forEach { seconds ->
                         FilterChip(
@@ -269,50 +269,53 @@ fun ConsecutiveScreen(
                         )
                     }
                 }
-                Text(
-                    when {
-                        hasAiSource -> "AI text-source mode"
-                        isWebSource -> "Web-player mode"
-                        else -> "Segment ${segmentIndex + 1} • ${formatDuration(segmentStart)} → ${formatDuration(segmentStart + segmentSeconds * 1000L)}"
-                    },
-                    style = MaterialTheme.typography.titleSmall
-                )
+
                 if (!isWebSource && !hasAiSource) {
+                    Text(
+                        "Segment ${segmentIndex + 1} · ${formatDuration(segmentStart)} → ${formatDuration(segmentStart + segmentSeconds * 1000L)}",
+                        style = MaterialTheme.typography.labelLarge
+                    )
                     LinearProgressIndicator(
                         progress = {
-                            ((position - segmentStart).coerceAtLeast(0L).toFloat() / (segmentSeconds * 1000L))
-                                .coerceIn(0f, 1f)
+                            ((position - segmentStart).coerceAtLeast(0L).toFloat() / (segmentSeconds * 1000L)).coerceIn(0f, 1f)
                         },
                         modifier = Modifier.fillMaxWidth()
                     )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        enabled = segmentIndex > 0 && hasNativeSource,
-                        onClick = {
-                            media.pause()
-                            segmentIndex--
-                            playCurrent()
-                        }
-                    ) { Text("Previous") }
-                    OutlinedButton(enabled = hasNativeSource, onClick = { playCurrent() }) { Text("Replay") }
-                    Button(enabled = hasNativeSource, onClick = { playNext() }) { Text("Next") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(
+                            enabled = segmentIndex > 0 && hasNativeSource,
+                            onClick = {
+                                media.pause()
+                                segmentIndex--
+                                playCurrent()
+                            }
+                        ) { Text("Previous") }
+                        FilledTonalButton(enabled = hasNativeSource, onClick = { playCurrent() }, shape = RoundedCornerShape(16.dp)) { Text("Replay") }
+                        Button(enabled = hasNativeSource, onClick = { playNext() }, shape = RoundedCornerShape(16.dp)) { Text("Next") }
+                    }
+                } else {
+                    Text(
+                        if (hasAiSource) "Use the source text above for memory and reformulation practice."
+                        else "Use the embedded player's controls for webpage media.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
-            LanguageSelector("Source language", sourceLang) { sourceLang = it }
-            LanguageSelector("Target language", targetLang) { targetLang = it }
-
-            OutlinedTextField(
-                value = notes,
-                onValueChange = { notes = it },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 130.dp),
-                label = { Text("Interpreter notes") }
-            )
+            SectionCard {
+                Text("Interpreter notes", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
+                    placeholder = { Text("Symbols, numbers, names, links between ideas…") },
+                    shape = RoundedCornerShape(18.dp)
+                )
+            }
 
             PracticeTranscriptionPanel(
                 language = targetLang,
-                onLanguageChange = { targetLang = it },
                 transcript = transcript,
                 onTranscriptChange = { transcript = it },
                 title = "Interpretation transcription"
@@ -321,6 +324,7 @@ fun ConsecutiveScreen(
             Button(
                 enabled = hasSource,
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
                 onClick = {
                     val duration = if (isWebSource || hasAiSource) 0L else position
                     sessionViewModel.save(
@@ -340,7 +344,7 @@ fun ConsecutiveScreen(
                 }
             ) { Text("Save session") }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
         }
     }
 }

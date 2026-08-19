@@ -42,6 +42,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.interpretertrainer.app.ai.AiPracticeBridge
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
+import com.interpretertrainer.app.speech.MicrophoneSessionCoordinator
+import com.interpretertrainer.app.speech.NaturalAndroidVoice
 import com.interpretertrainer.app.viewmodel.SessionViewModel
 import org.json.JSONObject
 import java.util.Locale
@@ -49,9 +51,9 @@ import java.util.Locale
 /**
  * Online Interpreter AI powered through Puter/Qwen.
  *
- * The WebView owns the chat UX, while this screen exposes native Android speech recognition and
- * text-to-speech to JavaScript. Normal chat streams tokens for low perceived latency. Voice Call
- * adds automatic turn-taking: listen -> send -> speak the answer -> listen again.
+ * The WebView owns the chat UX. Native Android supplies reliable microphone capture and a TTS
+ * fallback. Microphone ownership is shared with all practice modes so AI voice, transcription and
+ * MediaRecorder never fight over the same hardware input.
  */
 @Composable
 fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
@@ -110,9 +112,13 @@ private class PracticeContextBridge(
     private val requestMicrophonePermission: () -> Unit
 ) : RecognitionListener, TextToSpeech.OnInitListener {
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val microphoneOwnerId = "ai-voice-${System.identityHashCode(this)}"
+
     private var webView: WebView? = null
     private var recognizer: SpeechRecognizer? = null
     private var textToSpeech: TextToSpeech? = null
+    private var recognitionActive = false
+    private var recognitionStartToken = 0L
 
     @Volatile
     private var ttsReady = false
@@ -152,19 +158,25 @@ private class PracticeContextBridge(
                 requestMicrophonePermission()
                 return@post
             }
-            beginVoiceRecognition()
+            acquireAndBeginRecognition()
         }
     }
 
     @JavascriptInterface
     fun stopVoiceInput() {
         mainHandler.post {
-            recognizer?.cancel()
-            evaluateJs("window.__voiceInputStopped?.();")
+            stopRecognition(releaseLease = true, notifyWeb = true)
         }
     }
 
-    /** Returns true when Android TTS accepted the utterance. */
+    private fun acquireAndBeginRecognition() {
+        MicrophoneSessionCoordinator.acquire(microphoneOwnerId) {
+            stopRecognition(releaseLease = false, notifyWeb = true)
+        }
+        beginVoiceRecognition(recreate = false)
+    }
+
+    /** Returns true when a native fallback utterance can be queued. */
     @JavascriptInterface
     fun speakText(text: String, languageTag: String): Boolean {
         val clean = text.trim().take(8_000)
@@ -172,10 +184,23 @@ private class PracticeContextBridge(
 
         val targetLanguage = normalizeVoiceLanguage(languageTag)
         mainHandler.post {
-            val tts = textToSpeech ?: return@post
-            tts.language = localeFor(targetLanguage)
-            tts.setSpeechRate(1.0f)
-            tts.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "interpreter-ai-reply-${System.nanoTime()}")
+            val tts = textToSpeech ?: run {
+                evaluateJs("window.__nativeSpeechFinished?.();")
+                return@post
+            }
+            if (!NaturalAndroidVoice.configure(tts, targetLanguage, 0.98f)) {
+                evaluateJs("window.__nativeSpeechFinished?.();")
+                return@post
+            }
+            val result = tts.speak(
+                clean,
+                TextToSpeech.QUEUE_FLUSH,
+                null,
+                "interpreter-ai-reply-${System.nanoTime()}"
+            )
+            if (result == TextToSpeech.ERROR) {
+                evaluateJs("window.__nativeSpeechFinished?.();")
+            }
         }
         return true
     }
@@ -190,36 +215,76 @@ private class PracticeContextBridge(
             val shouldStart = pendingVoiceStart
             pendingVoiceStart = false
             if (granted && shouldStart) {
-                beginVoiceRecognition()
+                acquireAndBeginRecognition()
             } else if (!granted) {
                 sendVoiceError("Microphone permission is required for voice chat.")
             }
         }
     }
 
-    private fun beginVoiceRecognition() {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            sendVoiceError("Speech recognition is not available on this device.")
-            return
+    private fun ensureRecognizer(recreate: Boolean) {
+        if (recreate) {
+            runCatching { recognizer?.cancel() }
+            runCatching { recognizer?.destroy() }
+            recognizer = null
+            recognitionActive = false
         }
-
-        recognizer?.cancel()
         if (recognizer == null) {
             recognizer = SpeechRecognizer.createSpeechRecognizer(context).also {
                 it.setRecognitionListener(this)
             }
         }
+    }
 
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, voiceLanguage)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, voiceLanguage)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+    private fun beginVoiceRecognition(recreate: Boolean) {
+        if (!MicrophoneSessionCoordinator.isOwner(microphoneOwnerId)) return
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            MicrophoneSessionCoordinator.release(microphoneOwnerId)
+            sendVoiceError("Speech recognition is not available on this device.")
+            return
         }
 
-        evaluateJs("window.__voiceInputStarted?.();")
-        recognizer?.startListening(intent)
+        if (recognitionActive) {
+            runCatching { recognizer?.cancel() }
+            recognitionActive = false
+        }
+
+        ensureRecognizer(recreate)
+        val token = ++recognitionStartToken
+        mainHandler.postDelayed({
+            if (token != recognitionStartToken || !MicrophoneSessionCoordinator.isOwner(microphoneOwnerId)) {
+                return@postDelayed
+            }
+
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, voiceLanguage)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, voiceLanguage)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
+            }
+
+            runCatching {
+                recognizer?.startListening(intent)
+                recognitionActive = true
+                evaluateJs("window.__voiceInputStarted?.();")
+            }.onFailure {
+                recognitionActive = false
+                runCatching { recognizer?.destroy() }
+                recognizer = null
+                MicrophoneSessionCoordinator.release(microphoneOwnerId)
+                sendVoiceError("The microphone could not start. Try again.")
+            }
+        }, if (recreate) 220L else 90L)
+    }
+
+    private fun stopRecognition(releaseLease: Boolean, notifyWeb: Boolean) {
+        recognitionStartToken++
+        runCatching { recognizer?.cancel() }
+        recognitionActive = false
+        if (releaseLease) MicrophoneSessionCoordinator.release(microphoneOwnerId)
+        if (notifyWeb) evaluateJs("window.__voiceInputStopped?.();")
     }
 
     private fun evaluateJs(script: String) {
@@ -233,20 +298,38 @@ private class PracticeContextBridge(
 
     private fun sendVoiceError(message: String) = sendVoiceText("__voiceInputError", message)
 
-    override fun onReadyForSpeech(params: Bundle?) = Unit
+    override fun onReadyForSpeech(params: Bundle?) {
+        recognitionActive = true
+    }
+
     override fun onBeginningOfSpeech() = Unit
     override fun onRmsChanged(rmsdB: Float) = Unit
     override fun onBufferReceived(buffer: ByteArray?) = Unit
-    override fun onEndOfSpeech() = evaluateJs("window.__voiceInputStopped?.();")
+    override fun onEndOfSpeech() = Unit
 
     override fun onError(error: Int) {
+        recognitionActive = false
+        MicrophoneSessionCoordinator.release(microphoneOwnerId)
+
+        if (
+            error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
+            error == SpeechRecognizer.ERROR_CLIENT ||
+            error == SpeechRecognizer.ERROR_AUDIO
+        ) {
+            runCatching { recognizer?.cancel() }
+            runCatching { recognizer?.destroy() }
+            recognizer = null
+        }
+
         sendVoiceError(
             when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH -> "I couldn't understand that."
                 SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech was detected."
                 SpeechRecognizer.ERROR_NETWORK,
                 SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Voice recognition network error."
-                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Voice recognition is busy."
+                SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
+                SpeechRecognizer.ERROR_CLIENT,
+                SpeechRecognizer.ERROR_AUDIO -> "The microphone is resetting. Try again."
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is required."
                 else -> "Voice recognition error ($error)."
             }
@@ -254,6 +337,9 @@ private class PracticeContextBridge(
     }
 
     override fun onResults(results: Bundle?) {
+        recognitionActive = false
+        MicrophoneSessionCoordinator.release(microphoneOwnerId)
+
         val text = results
             ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             ?.firstOrNull()
@@ -301,9 +387,12 @@ private class PracticeContextBridge(
 
     fun dispose() {
         mainHandler.post {
-            recognizer?.cancel()
-            recognizer?.destroy()
+            recognitionStartToken++
+            runCatching { recognizer?.cancel() }
+            runCatching { recognizer?.destroy() }
             recognizer = null
+            recognitionActive = false
+            MicrophoneSessionCoordinator.release(microphoneOwnerId)
             textToSpeech?.stop()
             textToSpeech?.shutdown()
             textToSpeech = null
@@ -316,12 +405,6 @@ private class PracticeContextBridge(
         "ar", "ar-ma", "arabic" -> "ar-MA"
         "fr", "fr-fr", "french" -> "fr-FR"
         else -> "en-US"
-    }
-
-    private fun localeFor(tag: String): Locale = when (tag) {
-        "ar-MA" -> Locale("ar", "MA")
-        "fr-FR" -> Locale.FRANCE
-        else -> Locale.US
     }
 }
 
@@ -368,6 +451,19 @@ private fun coachEnhancementScript(): String = """
   window.__interpreterEnhancementsV3 = true;
 
   const native = window.InterpreterNative;
+  const speakVoice = (text, lang) => {
+    try {
+      if (typeof window.playNaturalInterpreterVoice === 'function') {
+        return window.playNaturalInterpreterVoice(text, lang) === true;
+      }
+    } catch (_) {}
+    return native?.speakText?.(text, lang) === true;
+  };
+  const stopVoice = () => {
+    try { window.stopNaturalInterpreterVoice?.(); } catch (_) {}
+    try { native?.stopSpeaking?.(); } catch (_) {}
+  };
+
   const mode = document.getElementById('mode');
   if (mode) {
     mode.innerHTML = '<option>Simultaneous Interpretation</option><option>Shadowing</option><option>Consecutive Interpretation</option><option>Live Transcription</option>';
@@ -456,7 +552,7 @@ private fun coachEnhancementScript(): String = """
       window.__voiceCallActive = false;
       window.__voiceOneShot = true;
       native?.setVoiceLanguage?.(language?.value || 'en-US');
-      native?.stopSpeaking?.();
+      stopVoice();
       native?.startVoiceInput?.();
     };
     composer.insertBefore(mic, sendButton);
@@ -556,7 +652,7 @@ private fun coachEnhancementScript(): String = """
     window.__voiceAutoSpeak = false;
     clearTimeout(callRetryTimer);
     native?.stopVoiceInput?.();
-    native?.stopSpeaking?.();
+    stopVoice();
     setOrbState(null);
     overlay.classList.remove('active');
     callStatus('Ready', 'Start speaking naturally. Interpreter AI will answer aloud and keep the conversation going.');
@@ -674,7 +770,7 @@ private fun coachEnhancementScript(): String = """
       speak.onclick = () => {
         const text = (bubble.innerText || bubble.textContent || '').trim();
         const lang = document.getElementById('voiceLang')?.value || 'en-US';
-        native?.speakText?.(text, lang);
+        speakVoice(text, lang);
       };
       actions.appendChild(speak);
 
@@ -766,14 +862,14 @@ private fun coachEnhancementScript(): String = """
       if (window.__voiceCallActive) {
         callStatus('Interpreter AI is speaking', answer);
         const callLang = document.getElementById('callVoiceLang')?.value || 'en-US';
-        const started = native?.speakText?.(answer, callLang) === true;
+        const started = speakVoice(answer, callLang);
         if (!started) {
           callStatus('Your turn', 'Voice output is unavailable; listening again.');
           setTimeout(() => scheduleListening(150), 0);
         }
       } else if (window.__voiceAutoSpeak || window.__voiceOneShot) {
         const lang = document.getElementById('voiceLang')?.value || 'en-US';
-        native?.speakText?.(answer, lang);
+        speakVoice(answer, lang);
       }
 
       window.__voiceAutoSpeak = false;
@@ -815,6 +911,7 @@ private fun configureCoachWebView(webView: WebView) {
         mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         allowFileAccess = false
         allowContentAccess = false
+        mediaPlaybackRequiresUserGesture = false
         cacheMode = WebSettings.LOAD_DEFAULT
     }
 }

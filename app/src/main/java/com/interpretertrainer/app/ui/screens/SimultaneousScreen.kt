@@ -10,20 +10,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -117,9 +113,8 @@ fun SimultaneousScreen(
             errorMessage = it.message ?: "That link is not valid."
             return
         }
-
-        mediaUrl = resolved.normalizedUrl
         sourceMedia.pause()
+        mediaUrl = resolved.normalizedUrl
 
         if (resolved.usesNativePlayer) {
             sourceMedia.loadUrl(resolved.playbackUrl)
@@ -129,9 +124,7 @@ fun SimultaneousScreen(
                     webSourceUrl = null
                     resetPracticeForNewSource()
                 }
-                .onFailure {
-                    errorMessage = it.message ?: "Could not load that direct media link."
-                }
+                .onFailure { errorMessage = it.message ?: "Could not load that media link." }
         } else {
             sourceMedia.clear()
             sourceName = resolved.displayName
@@ -143,15 +136,14 @@ fun SimultaneousScreen(
 
     fun beginInterpretation() {
         if (!hasSource) {
-            errorMessage = "Add a video/audio source, web link or source text first."
+            errorMessage = "Add a video/audio source, webpage or source text first."
             return
         }
         if (isRecording) return
 
         runCatching {
             recordingMedia.pause()
-            val file = recorder.start()
-            recordingPath = file.absolutePath
+            recordingPath = recorder.start().absolutePath
             recordingStartedAt = System.currentTimeMillis()
             recordingElapsed = 0L
             clearFeedback()
@@ -174,11 +166,21 @@ fun SimultaneousScreen(
         isRecording = false
     }
 
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) beginInterpretation() else errorMessage = "Microphone permission is required."
+    }
+
+    fun requestStart() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            beginInterpretation()
+        } else {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
     fun generateLocalFeedback() {
         val sourceDuration = if (hasNativeMedia) {
-            sourceMedia.player.duration
-                .takeIf { it > 0L }
-                ?.let { (it / speed.coerceAtLeast(0.1f)).toLong() }
+            sourceMedia.player.duration.takeIf { it > 0L }?.let { (it / speed.coerceAtLeast(.1f)).toLong() }
         } else null
 
         val report = LocalInterpreterCoach.analyze(
@@ -193,19 +195,6 @@ fun SimultaneousScreen(
         localScore = report.overallScore
         localFeedback = report.asPlainText()
         errorMessage = null
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) beginInterpretation()
-        else errorMessage = "Microphone permission is required to record your interpretation."
-    }
-
-    fun requestStart() {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            beginInterpretation()
-        } else {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
     }
 
     LaunchedEffect(isRecording, hasNativeMedia) {
@@ -237,416 +226,176 @@ fun SimultaneousScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .padding(16.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Surface(
-                                shape = MaterialTheme.shapes.large,
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(46.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.Headphones, null, tint = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                            Column(Modifier.weight(1f)) {
-                                Text("Live simultaneous practice", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    "Use local media, direct streams, YouTube/Vimeo or ordinary webpage links beside the source text.",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        BoxWithConstraints(Modifier.fillMaxWidth()) {
-                            if (maxWidth >= 620.dp) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Box(Modifier.weight(1f)) { LanguageSelector("Source language", sourceLang) { sourceLang = it; clearFeedback() } }
-                                    Box(Modifier.weight(1f)) { LanguageSelector("Target language", targetLang) { targetLang = it; clearFeedback() } }
-                                }
-                            } else {
-                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    LanguageSelector("Source language", sourceLang) { sourceLang = it; clearFeedback() }
-                                    LanguageSelector("Target language", targetLang) { targetLang = it; clearFeedback() }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Text("Source workspace", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-
-                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    if (maxWidth >= 760.dp) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            SimultaneousMediaPane(
-                                modifier = Modifier.weight(1.08f),
-                                sourceMedia = sourceMedia,
-                                sourceName = sourceName,
-                                hasNativeMedia = hasNativeMedia,
-                                webSourceUrl = webSourceUrl,
-                                mediaUrl = mediaUrl,
-                                onMediaUrlChange = { mediaUrl = it; errorMessage = null },
-                                onChooseMedia = { picker.launch(arrayOf("audio/*", "video/*")) },
-                                onLoadUrl = { loadNetworkSource() },
-                                speed = speed,
-                                onSpeedChange = { speed = it; sourceMedia.setSpeed(it); clearFeedback() },
-                                enabled = !isRecording
-                            )
-                            SimultaneousTextPane(
-                                modifier = Modifier.weight(.92f),
-                                sourceText = sourceText,
-                                onSourceTextChange = { sourceText = it; clearFeedback(); errorMessage = null },
-                                onOpenAiCoach = onOpenAiCoach,
-                                enabled = !isRecording
-                            )
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            SimultaneousMediaPane(
-                                modifier = Modifier.fillMaxWidth(),
-                                sourceMedia = sourceMedia,
-                                sourceName = sourceName,
-                                hasNativeMedia = hasNativeMedia,
-                                webSourceUrl = webSourceUrl,
-                                mediaUrl = mediaUrl,
-                                onMediaUrlChange = { mediaUrl = it; errorMessage = null },
-                                onChooseMedia = { picker.launch(arrayOf("audio/*", "video/*")) },
-                                onLoadUrl = { loadNetworkSource() },
-                                speed = speed,
-                                onSpeedChange = { speed = it; sourceMedia.setSpeed(it); clearFeedback() },
-                                enabled = !isRecording
-                            )
-                            SimultaneousTextPane(
-                                modifier = Modifier.fillMaxWidth(),
-                                sourceText = sourceText,
-                                onSourceTextChange = { sourceText = it; clearFeedback(); errorMessage = null },
-                                onOpenAiCoach = onOpenAiCoach,
-                                enabled = !isRecording
-                            )
-                        }
-                    }
-                }
-
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Icon(
-                                if (isRecording) Icons.Default.Mic else Icons.Default.Headphones,
-                                contentDescription = null,
-                                tint = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                            )
-                            Column(Modifier.weight(1f)) {
-                                Text("Interpretation booth", style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    if (isRecording) "Recording your interpretation • ${formatDuration(recordingElapsed)}" else "Ready when you are",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        if (hasWebSource) {
-                            Text(
-                                "This is a web-player link. Start or pause the source with the controls in the video pane; recording remains independent so the website cannot interrupt your microphone session.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            Text(
-                                "For clean recordings, use headphones so your microphone captures your voice instead of the source audio.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        if (!isRecording) {
-                            Button(onClick = { requestStart() }, enabled = hasSource, modifier = Modifier.fillMaxWidth()) {
-                                Icon(Icons.Default.Mic, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Start interpreting")
-                            }
-                        } else {
-                            Button(
-                                onClick = { finishInterpretation() },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.error,
-                                    contentColor = MaterialTheme.colorScheme.onError
-                                )
-                            ) {
-                                Icon(Icons.Default.Stop, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Stop recording")
-                            }
-                        }
-
-                        recordingPath?.let { path ->
-                            val file = File(path)
-                            if (file.exists() && !isRecording) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedButton(
-                                        modifier = Modifier.weight(1f),
-                                        onClick = { recordingMedia.load(Uri.fromFile(file)); recordingMedia.play() }
-                                    ) {
-                                        Icon(Icons.Default.PlayArrow, null)
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("Replay")
-                                    }
-                                    OutlinedButton(modifier = Modifier.weight(1f), onClick = { recordingMedia.pause() }) {
-                                        Text("Stop playback")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.Description, null)
-                            Text("Transcription & review", style = MaterialTheme.typography.titleMedium)
-                        }
-
-                        OutlinedTextField(
-                            value = interpretationTranscript,
-                            onValueChange = { interpretationTranscript = it; clearFeedback() },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
-                            label = { Text("Your interpretation transcript") },
-                            placeholder = { Text("Paste or type what you interpreted") },
-                            enabled = !isRecording
-                        )
-                        OutlinedTextField(
-                            value = notes,
-                            onValueChange = { notes = it },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp),
-                            label = { Text("Practice notes") }
-                        )
-
-                        Text(
-                            "Quick feedback checks measurable details such as timing, numbers, names and output balance. For cross-language meaning and reformulation, use the full AI coach.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                modifier = Modifier.weight(1f),
-                                enabled = !isRecording && (recordingElapsed > 0L || sourceText.isNotBlank() || interpretationTranscript.isNotBlank()),
-                                onClick = { generateLocalFeedback() }
-                            ) {
-                                Icon(Icons.Default.AutoAwesome, null)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Quick feedback")
-                            }
-                            OutlinedButton(modifier = Modifier.weight(1f), onClick = onOpenAiCoach) { Text("AI Coach") }
-                        }
-
-                        errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                        localScore?.let {
-                            Text("Observable score: $it / 100", style = MaterialTheme.typography.titleMedium)
-                            LinearProgressIndicator(progress = { it / 100f }, modifier = Modifier.fillMaxWidth())
-                        }
-                        if (localFeedback.isNotBlank()) {
-                            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.large) {
-                                Text(localFeedback, modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
-                            }
-                        }
-                    }
-                }
-
-                Button(
-                    enabled = hasSource && !isRecording,
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        val mediaPosition = if (hasNativeMedia) sourceMedia.player.currentPosition.coerceAtLeast(0L) else 0L
-                        val duration = maxOf(mediaPosition, recordingElapsed)
-                        sessionViewModel.save(
-                            PracticeSessionEntity(
-                                practiceMode = PracticeMode.SIMULTANEOUS_INTERPRETATION.name,
-                                sourceLanguage = sourceLang.tag,
-                                targetLanguage = targetLang.tag,
-                                startedAt = System.currentTimeMillis() - duration,
-                                durationMillis = duration,
-                                sourceName = sourceName ?: "Source text",
-                                transcript = interpretationTranscript,
-                                notes = notes,
-                                segmentDurationSeconds = null,
-                                status = "COMPLETED",
-                                recordingPath = recordingPath,
-                                aiFeedback = localFeedback.ifBlank { null }
-                            )
-                        )
-                    }
-                ) { Text("Save simultaneous session") }
-
-                Spacer(Modifier.height(16.dp))
+            SectionCard {
+                Text("Languages", style = MaterialTheme.typography.titleMedium)
+                LanguageSelector("Source language", sourceLang) { sourceLang = it; clearFeedback() }
+                LanguageSelector("Target language", targetLang) { targetLang = it; clearFeedback() }
             }
-        }
-    }
-}
 
-@Composable
-private fun SimultaneousMediaPane(
-    modifier: Modifier,
-    sourceMedia: MediaController,
-    sourceName: String?,
-    hasNativeMedia: Boolean,
-    webSourceUrl: String?,
-    mediaUrl: String,
-    onMediaUrlChange: (String) -> Unit,
-    onChooseMedia: () -> Unit,
-    onLoadUrl: () -> Unit,
-    speed: Float,
-    onSpeedChange: (Float) -> Unit,
-    enabled: Boolean
-) {
-    val hasWebSource = !webSourceUrl.isNullOrBlank()
-
-    ElevatedCard(modifier = modifier) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Default.VideoLibrary, null, tint = MaterialTheme.colorScheme.primary)
-                Column(Modifier.weight(1f)) {
-                    Text("Video / audio", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Paste a normal video link, webpage link, direct stream, or choose a file from your phone.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+            SectionCard {
+                Text("Source workspace", style = MaterialTheme.typography.titleMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { picker.launch(arrayOf("audio/*", "video/*")) }, enabled = !isRecording) {
+                        Text("Choose media")
+                    }
+                    OutlinedButton(onClick = onOpenAiCoach, enabled = !isRecording) {
+                        Icon(Icons.Default.AutoAwesome, null)
+                        Text(" AI Coach")
+                    }
                 }
+
+                OutlinedTextField(
+                    value = mediaUrl,
+                    onValueChange = { mediaUrl = it; errorMessage = null },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Media or webpage link") },
+                    placeholder = { Text("youtube.com/watch?v=… or https://…/video.mp4") },
+                    leadingIcon = { Icon(Icons.Default.Link, null) },
+                    enabled = !isRecording,
+                    singleLine = true
+                )
+                OutlinedButton(onClick = { loadNetworkSource() }, enabled = !isRecording && mediaUrl.isNotBlank()) {
+                    Text("Load link")
+                }
+
+                OutlinedTextField(
+                    value = sourceText,
+                    onValueChange = { sourceText = it; clearFeedback() },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 170.dp),
+                    label = { Text("Source transcript / AI text") },
+                    placeholder = { Text("Paste source text or use “Use in Simultaneous” in AI Coach") },
+                    enabled = !isRecording
+                )
+
+                Text("Playback speed", style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(.75f, 1f, 1.25f).forEach { value ->
+                        FilterChip(
+                            selected = speed == value,
+                            enabled = !isRecording,
+                            onClick = {
+                                speed = value
+                                if (hasNativeMedia) sourceMedia.setSpeed(value)
+                            },
+                            label = { Text("${value}x") }
+                        )
+                    }
+                }
+                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
 
             when {
                 hasNativeMedia -> AndroidView(
                     factory = { PlayerView(it).apply { player = sourceMedia.player; useController = true } },
-                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                    modifier = Modifier.fillMaxWidth().height(220.dp)
                 )
                 hasWebSource -> EmbeddedWebSource(
                     url = webSourceUrl!!,
-                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
-                )
-                else -> Surface(
-                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(Icons.Default.VideoLibrary, null, modifier = Modifier.size(38.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(8.dp))
-                        Text("Your source will appear here")
-                    }
-                }
-            }
-
-            sourceName?.let {
-                Text(
-                    if (hasWebSource) "$it • web player" else it,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
+                    modifier = Modifier.fillMaxWidth().height(240.dp)
                 )
             }
 
-            FilledTonalButton(onClick = onChooseMedia, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-                Text("Choose media from phone")
-            }
-
-            OutlinedTextField(
-                value = mediaUrl,
-                onValueChange = onMediaUrlChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Media or webpage link") },
-                placeholder = { Text("youtube.com/watch?v=… or https://…/video.mp4") },
-                singleLine = true,
-                leadingIcon = { Icon(Icons.Default.Link, null) },
-                enabled = enabled
-            )
-            OutlinedButton(
-                onClick = onLoadUrl,
-                enabled = enabled && mediaUrl.isNotBlank(),
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Load link") }
-
-            if (hasWebSource) {
+            SectionCard {
+                Text("Interpretation booth", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Use the controls inside the embedded page. Some websites may require sign-in or may block embedded playback; those restrictions come from the website itself.",
-                    style = MaterialTheme.typography.bodySmall,
+                    if (isRecording) "Recording • ${formatDuration(recordingElapsed)}" else "Use headphones and start when the source is ready.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            } else {
-                Text("Playback speed", style = MaterialTheme.typography.labelLarge)
-                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    listOf(.75f, 1f, 1.25f).forEach { value ->
-                        FilterChip(
-                            selected = speed == value,
-                            enabled = enabled && hasNativeMedia,
-                            onClick = { onSpeedChange(value) },
-                            label = { Text("${value}x") }
-                        )
+                Button(
+                    onClick = { if (isRecording) finishInterpretation() else requestStart() },
+                    enabled = hasSource,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(if (isRecording) Icons.Default.Stop else Icons.Default.Mic, null)
+                    Text(if (isRecording) " Stop interpreting" else " Start interpreting")
+                }
+
+                recordingPath?.let { path ->
+                    val file = File(path)
+                    if (file.exists() && !isRecording) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = {
+                                recordingMedia.load(Uri.fromFile(file))
+                                recordingMedia.play()
+                            }) {
+                                Icon(Icons.Default.PlayArrow, null)
+                                Text(" Replay")
+                            }
+                            OutlinedButton(onClick = { recordingMedia.pause() }) { Text("Stop replay") }
+                        }
                     }
                 }
             }
-        }
-    }
-}
 
-@Composable
-private fun SimultaneousTextPane(
-    modifier: Modifier,
-    sourceText: String,
-    onSourceTextChange: (String) -> Unit,
-    onOpenAiCoach: () -> Unit,
-    enabled: Boolean
-) {
-    ElevatedCard(modifier = modifier) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Default.Description, null, tint = MaterialTheme.colorScheme.primary)
-                Column(Modifier.weight(1f)) {
-                    Text("Source text", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Keep the transcript, script or AI-generated practice text beside the media.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+            PracticeTranscriptionPanel(
+                language = targetLang,
+                onLanguageChange = { targetLang = it; clearFeedback() },
+                transcript = interpretationTranscript,
+                onTranscriptChange = { interpretationTranscript = it; clearFeedback() },
+                enabled = !isRecording,
+                title = "Simultaneous interpretation transcription"
+            )
+
+            SectionCard {
+                Text("Review", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp),
+                    label = { Text("Practice notes") }
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { generateLocalFeedback() },
+                        enabled = !isRecording && (sourceText.isNotBlank() || interpretationTranscript.isNotBlank() || recordingElapsed > 0L),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, null)
+                        Text(" Quick feedback")
+                    }
+                    OutlinedButton(onClick = onOpenAiCoach, modifier = Modifier.weight(1f)) {
+                        Text("AI Coach")
+                    }
+                }
+                localScore?.let {
+                    Text("Observable score: $it / 100", style = MaterialTheme.typography.titleSmall)
+                    LinearProgressIndicator(progress = { it / 100f }, modifier = Modifier.fillMaxWidth())
+                }
+                if (localFeedback.isNotBlank()) {
+                    Text(localFeedback, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            OutlinedButton(onClick = onOpenAiCoach, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.AutoAwesome, null)
-                Spacer(Modifier.width(6.dp))
-                Text("Generate practice text with AI")
-            }
-            OutlinedTextField(
-                value = sourceText,
-                onValueChange = onSourceTextChange,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp),
-                label = { Text("Source transcript / text") },
-                placeholder = { Text("Paste text here or send an AI Coach answer directly into this mode…") },
-                enabled = enabled
-            )
-            Text(
-                "You can practice from text alone. In AI Coach, use “Use in Simultaneous” under a generated answer to insert it here automatically.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+
+            Button(
+                enabled = hasSource && !isRecording,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    val mediaPosition = if (hasNativeMedia) sourceMedia.player.currentPosition.coerceAtLeast(0L) else 0L
+                    val duration = maxOf(mediaPosition, recordingElapsed)
+                    sessionViewModel.save(
+                        PracticeSessionEntity(
+                            practiceMode = PracticeMode.SIMULTANEOUS_INTERPRETATION.name,
+                            sourceLanguage = sourceLang.tag,
+                            targetLanguage = targetLang.tag,
+                            startedAt = System.currentTimeMillis() - duration,
+                            durationMillis = duration,
+                            sourceName = sourceName ?: if (sourceText.isNotBlank()) "Source text" else null,
+                            transcript = interpretationTranscript,
+                            notes = notes,
+                            segmentDurationSeconds = null,
+                            status = "COMPLETED",
+                            recordingPath = recordingPath,
+                            aiFeedback = localFeedback.ifBlank { null }
+                        )
+                    )
+                }
+            ) { Text("Save simultaneous session") }
+
+            Spacer(Modifier.height(12.dp))
         }
     }
 }

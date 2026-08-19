@@ -776,7 +776,7 @@ private fun coachEnhancementScript(): String = """
         const started = native?.speakText?.(answer, callLang) === true;
         if (!started) {
           callStatus('Your turn', 'Voice output is unavailable; listening again.');
-          scheduleListening(500);
+          setTimeout(() => scheduleListening(150), 0);
         }
       } else if (window.__voiceAutoSpeak || window.__voiceOneShot) {
         const lang = document.getElementById('voiceLang')?.value || 'en-US';
@@ -793,13 +793,18 @@ private fun coachEnhancementScript(): String = """
       setStatus('Request failed', 'bad');
       if (window.__voiceCallActive) {
         callStatus('Something went wrong', message);
-        scheduleListening(1000);
+        setTimeout(() => scheduleListening(450), 0);
       }
       window.__voiceAutoSpeak = false;
       window.__voiceOneShot = false;
     } finally {
       busy = false;
       updateSendState();
+      if (window.__voiceCallActive && !window.__voiceCallMuted && !window.__voiceAutoSpeak) {
+        // If no TTS callback is expected, ensure the next turn can resume after busy becomes false.
+        const statusText = document.getElementById('voiceCallStatus')?.textContent || '';
+        if (statusText === 'Your turn' || statusText === 'Something went wrong') scheduleListening(350);
+      }
       if (!window.__voiceCallActive) setTimeout(() => input?.focus(), 50);
     }
   };

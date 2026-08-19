@@ -110,27 +110,44 @@ jobs:
             -storepass android -alias androiddebugkey >/dev/null
           echo "Stable Interpreter Trainer development signing key installed."
 
-      - name: Guard online Interpreter AI architecture
+      - name: Guard Interpreter AI, microphone and natural voice architecture
         shell: bash
         run: |
           set -euo pipefail
           test -f app/src/main/assets/interpreter_coach.html
+          test -f app/src/main/java/com/interpretertrainer/app/speech/MicrophoneSessionCoordinator.kt
+          test -f app/src/main/java/com/interpretertrainer/app/speech/NaturalAndroidVoice.kt
           test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnDeviceInterpreterAi.kt
           test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnDeviceModelManager.kt
           test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnlineInterpreterAi.kt
+
           if grep -R -E "litertlm|LiteRT-LM|Install Interpreter AI|MODEL_DOWNLOAD_SIZE_LABEL|INTERPRETER_AI_BASE_URL" \
               app/src/main app/build.gradle.kts; then
             echo "Old local-model or placeholder-backend AI code must not return."
             exit 1
           fi
+
           grep -q "https://js.puter.com/v2/" app/src/main/assets/interpreter_coach.html
           grep -q "qwen/qwen3.6-27b" app/src/main/assets/interpreter_coach.html
+          grep -q "puter.ai.txt2speech" app/src/main/assets/interpreter_coach.html
+          grep -q "playNaturalInterpreterVoice" app/src/main/assets/interpreter_coach.html
           if grep -q -E "qwen/qwen3.7-flash|qwen/qwen3.8-max" app/src/main/assets/interpreter_coach.html; then
             echo "Legacy Interpreter AI model routing is still present."
             exit 1
           fi
           grep -q "attempt_temp_user_creation" app/src/main/assets/interpreter_coach.html
           grep -q "CoachChromeClient" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q "mediaPlaybackRequiresUserGesture = false" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+
+          grep -q "android.speech.RecognitionService" app/src/main/AndroidManifest.xml
+          grep -q "android.permission.RECORD_AUDIO" app/src/main/AndroidManifest.xml
+          grep -q "MicrophoneSessionCoordinator" app/src/main/java/com/interpretertrainer/app/speech/SpeechRecognizerManager.kt
+          grep -q "MicrophoneSessionCoordinator" app/src/main/java/com/interpretertrainer/app/media/ShadowingRecorder.kt
+          grep -q "MicrophoneSessionCoordinator" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q "NaturalAndroidVoice" app/src/main/java/com/interpretertrainer/app/ui/screens/ShadowingScreen.kt
+          grep -q "NaturalAndroidVoice" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+
+          echo "Interpreter AI, microphone coordination and natural voice guards passed."
 
       - name: Test media link routing
         run: gradle --no-daemon :app:testDebugUnitTest

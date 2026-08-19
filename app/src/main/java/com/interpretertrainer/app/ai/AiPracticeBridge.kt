@@ -12,6 +12,7 @@ import java.util.Locale
  */
 object AiPracticeBridge {
     const val MODE_SIMULTANEOUS = "SIMULTANEOUS"
+    const val MODE_SHADOWING = "SHADOWING"
     const val MODE_CONSECUTIVE = "CONSECUTIVE"
     const val MODE_TRANSCRIPTION = "TRANSCRIPTION"
 
@@ -27,6 +28,7 @@ object AiPracticeBridge {
     fun sendToMode(mode: String, text: String): Boolean {
         val normalizedMode = when (mode.trim().uppercase(Locale.ROOT)) {
             MODE_SIMULTANEOUS, "SIMULTANEOUS INTERPRETATION" -> MODE_SIMULTANEOUS
+            MODE_SHADOWING, "SHADOWING PRACTICE" -> MODE_SHADOWING
             MODE_CONSECUTIVE, "CONSECUTIVE INTERPRETATION" -> MODE_CONSECUTIVE
             MODE_TRANSCRIPTION, "LIVE TRANSCRIPTION" -> MODE_TRANSCRIPTION
             else -> return false

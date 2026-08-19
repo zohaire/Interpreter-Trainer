@@ -182,10 +182,7 @@ private class PracticeContextBridge(
 
     @JavascriptInterface
     fun stopSpeaking() {
-        mainHandler.post {
-            textToSpeech?.stop()
-            evaluateJs("window.__nativeSpeechStopped?.();")
-        }
+        mainHandler.post { textToSpeech?.stop() }
     }
 
     fun onMicrophonePermissionResult(granted: Boolean) {
@@ -656,10 +653,6 @@ private fun coachEnhancementScript(): String = """
     scheduleListening(350);
   };
 
-  window.__nativeSpeechStopped = () => {
-    if (window.__voiceCallActive && !window.__voiceCallMuted) scheduleListening(250);
-  };
-
   const enhanceAssistantMessages = () => {
     document.querySelectorAll('.message.assistant').forEach(row => {
       if (row.dataset.streaming === '1' || row.dataset.practiceActions === '1') return;
@@ -801,7 +794,6 @@ private fun coachEnhancementScript(): String = """
       busy = false;
       updateSendState();
       if (window.__voiceCallActive && !window.__voiceCallMuted && !window.__voiceAutoSpeak) {
-        // If no TTS callback is expected, ensure the next turn can resume after busy becomes false.
         const statusText = document.getElementById('voiceCallStatus')?.textContent || '';
         if (statusText === 'Your turn' || statusText === 'Something went wrong') scheduleListening(350);
       }

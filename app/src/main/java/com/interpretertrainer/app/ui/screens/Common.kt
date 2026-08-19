@@ -21,9 +21,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.interpretertrainer.app.R
 import com.interpretertrainer.app.media.AudioRouteKind
 import com.interpretertrainer.app.media.rememberAudioInputRoute
 import com.interpretertrainer.app.model.LanguageOption
@@ -34,7 +36,25 @@ fun TrainerScaffold(title: String, onBack: () -> Unit, content: @Composable (Pad
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(title, fontWeight = FontWeight.SemiBold) },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        if (title.contains("Coach", ignoreCase = true) || title.contains("Interpreter AI", ignoreCase = true)) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_interpreter_ai_face),
+                                    contentDescription = "Interpreter AI",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.padding(5.dp)
+                                )
+                            }
+                        }
+                        Text(title, fontWeight = FontWeight.SemiBold)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.media3.ui.PlayerView
+import com.interpretertrainer.app.ai.AiPracticeBridge
 import com.interpretertrainer.app.ai.LocalInterpreterCoach
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.media.MediaController
@@ -50,6 +51,7 @@ fun SimultaneousScreen(
     val sourceMedia = remember { MediaController(context) }
     val recordingMedia = remember { MediaController(context) }
     val recorder = remember { ShadowingRecorder(context.applicationContext) }
+    val aiPayload by AiPracticeBridge.payload.collectAsState()
 
     var sourceName by rememberSaveable { mutableStateOf<String?>(null) }
     var hasNativeMedia by rememberSaveable { mutableStateOf(false) }
@@ -82,6 +84,21 @@ fun SimultaneousScreen(
         recordingPath = null
         clearFeedback()
         errorMessage = null
+    }
+
+    LaunchedEffect(aiPayload?.id) {
+        val payload = aiPayload
+        if (payload != null && payload.mode == AiPracticeBridge.MODE_SIMULTANEOUS) {
+            sourceMedia.pause()
+            sourceMedia.clear()
+            sourceText = payload.text
+            sourceName = "AI Coach practice text"
+            hasNativeMedia = false
+            webSourceUrl = null
+            mediaUrl = ""
+            resetPracticeForNewSource()
+            AiPracticeBridge.consume(payload.id)
+        }
     }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -294,6 +311,7 @@ fun SimultaneousScreen(
                                 modifier = Modifier.weight(.92f),
                                 sourceText = sourceText,
                                 onSourceTextChange = { sourceText = it; clearFeedback(); errorMessage = null },
+                                onOpenAiCoach = onOpenAiCoach,
                                 enabled = !isRecording
                             )
                         }
@@ -317,6 +335,7 @@ fun SimultaneousScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 sourceText = sourceText,
                                 onSourceTextChange = { sourceText = it; clearFeedback(); errorMessage = null },
+                                onOpenAiCoach = onOpenAiCoach,
                                 enabled = !isRecording
                             )
                         }
@@ -594,6 +613,7 @@ private fun SimultaneousTextPane(
     modifier: Modifier,
     sourceText: String,
     onSourceTextChange: (String) -> Unit,
+    onOpenAiCoach: () -> Unit,
     enabled: Boolean
 ) {
     ElevatedCard(modifier = modifier) {
@@ -603,22 +623,27 @@ private fun SimultaneousTextPane(
                 Column(Modifier.weight(1f)) {
                     Text("Source text", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Keep the transcript, script or preparation text beside the media.",
+                        "Keep the transcript, script or AI-generated practice text beside the media.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+            }
+            OutlinedButton(onClick = onOpenAiCoach, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.AutoAwesome, null)
+                Spacer(Modifier.width(6.dp))
+                Text("Generate practice text with AI")
             }
             OutlinedTextField(
                 value = sourceText,
                 onValueChange = onSourceTextChange,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp),
                 label = { Text("Source transcript / text") },
-                placeholder = { Text("Paste the speaker transcript or source text here…") },
+                placeholder = { Text("Paste text here or send an AI Coach answer directly into this mode…") },
                 enabled = enabled
             )
             Text(
-                "You can also practice from text alone when no media is loaded.",
+                "You can practice from text alone. In AI Coach, use “Use in Simultaneous” under a generated answer to insert it here automatically.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

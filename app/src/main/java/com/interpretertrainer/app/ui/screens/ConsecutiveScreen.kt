@@ -54,15 +54,6 @@ fun ConsecutiveScreen(
     val hasSource = sourceName != null || hasAiSource
     val hasNativeSource = sourceName != null && !isWebSource && !hasAiSource
 
-    fun resetSegments() {
-        media.pause()
-        segmentIndex = 0
-        segmentStart = 0L
-        position = 0L
-        if (hasNativeSource) media.seekTo(0L)
-        sourceError = null
-    }
-
     LaunchedEffect(aiPayload?.id) {
         val payload = aiPayload
         if (payload != null && payload.mode == AiPracticeBridge.MODE_CONSECUTIVE) {
@@ -318,11 +309,13 @@ fun ConsecutiveScreen(
                 modifier = Modifier.fillMaxWidth().heightIn(min = 130.dp),
                 label = { Text("Interpreter notes") }
             )
-            OutlinedTextField(
-                value = transcript,
-                onValueChange = { transcript = it },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 130.dp),
-                label = { Text("Interpretation transcript") }
+
+            PracticeTranscriptionPanel(
+                language = targetLang,
+                onLanguageChange = { targetLang = it },
+                transcript = transcript,
+                onTranscriptChange = { transcript = it },
+                title = "Interpretation transcription"
             )
 
             Button(

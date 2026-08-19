@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import com.interpretertrainer.app.ai.AiPracticeBridge
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.viewmodel.SessionViewModel
 import java.util.Locale
@@ -73,10 +74,14 @@ fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
 
 private class PracticeContextBridge {
     @Volatile
-    var contextValue: String = "No saved practice sessions yet."
+    var contextValue: String = buildPracticeContext(emptyList())
 
     @JavascriptInterface
     fun getPracticeContext(): String = contextValue
+
+    /** Called from the coach UI when the user wants an AI answer inserted into a practice mode. */
+    @JavascriptInterface
+    fun sendToPractice(mode: String, text: String): Boolean = AiPracticeBridge.sendToMode(mode, text)
 }
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -102,12 +107,56 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
                   if (mode) {
                     mode.innerHTML = '<option>Simultaneous Interpretation</option><option>Consecutive Interpretation</option><option>Live Transcription</option>';
                   }
+
                   const suggestions = Array.from(document.querySelectorAll('.suggestion'));
                   const oldShadowing = suggestions.find(button => button.textContent.includes('Shadowing'));
                   if (oldShadowing) {
                     oldShadowing.textContent = 'Simultaneous exercise';
                     oldShadowing.onclick = () => window.useSuggestion?.('Give me a short simultaneous interpreting exercise in English, French, or Arabic.');
                   }
+
+                  const targets = [
+                    ['SIMULTANEOUS', 'Use in Simultaneous'],
+                    ['CONSECUTIVE', 'Use in Consecutive'],
+                    ['TRANSCRIPTION', 'Use in Transcription']
+                  ];
+
+                  const enhanceAssistantMessages = () => {
+                    document.querySelectorAll('.message.assistant').forEach(row => {
+                      if (row.dataset.practiceActions === '1') return;
+                      const bubble = row.querySelector('.bubble');
+                      if (!bubble) return;
+                      let actions = row.querySelector('.message-actions');
+                      if (!actions) {
+                        const body = bubble.parentElement;
+                        if (!body) return;
+                        actions = document.createElement('div');
+                        actions.className = 'message-actions';
+                        body.appendChild(actions);
+                      }
+
+                      targets.forEach(([target, label]) => {
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.className = 'message-action';
+                        button.textContent = label;
+                        button.onclick = () => {
+                          const practiceText = (bubble.innerText || bubble.textContent || '').trim();
+                          const ok = window.InterpreterNative?.sendToPractice?.(target, practiceText) === true;
+                          const original = label;
+                          button.textContent = ok ? 'Added ✓' : 'Could not add';
+                          setTimeout(() => { button.textContent = original; }, 1400);
+                        };
+                        actions.appendChild(button);
+                      });
+                      row.dataset.practiceActions = '1';
+                    });
+                  };
+
+                  window.__interpreterPracticeObserver?.disconnect?.();
+                  window.__interpreterPracticeObserver = new MutationObserver(enhanceAssistantMessages);
+                  window.__interpreterPracticeObserver.observe(document.body, { childList: true, subtree: true });
+                  enhanceAssistantMessages();
                 })();
                 """.trimIndent(),
                 null
@@ -227,6 +276,12 @@ private class CoachChromeClient(private val context: Context) : WebChromeClient(
 }
 
 private fun buildPracticeContext(sessions: List<PracticeSessionEntity>): String = buildString {
+    appendLine("AUTHORITATIVE APP IDENTITY:")
+    appendLine("Interpreter Trainer was created and developed by Zouhair Elachaqi.")
+    appendLine("Zouhair Elachaqi is the creator of this app, not the AI model or Puter service.")
+    appendLine("If the user asks who created, developed, designed, owns, or made the app, answer with Zouhair Elachaqi and do not claim that the creator is unknown.")
+    appendLine()
+
     if (sessions.isEmpty()) {
         append("No saved practice sessions yet.")
         return@buildString

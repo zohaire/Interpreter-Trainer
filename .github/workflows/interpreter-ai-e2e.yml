@@ -1,0 +1,105 @@
+name: Interpreter AI End-to-End
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - "app/src/main/assets/interpreter_coach.html"
+      - "app/src/main/assets/interpreter_ai_bootstrap.js"
+      - "app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt"
+      - "app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt"
+      - ".github/workflows/interpreter-ai-e2e.yml"
+
+jobs:
+  real-qwen-response:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate bundled AI bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'interpreter_ai_bootstrap.js' app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt
+          grep -q 'qwen/qwen3.6-27b' app/src/main/assets/interpreter_coach.html
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/interpreter-ai-e2e
+          cd /tmp/interpreter-ai-e2e
+          npm init -y >/dev/null
+          npm install --silent playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Authenticate temporary user and generate a real Qwen reply
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/interpreter-ai-e2e/index.html <<'HTML'
+          <!doctype html><html><body>
+          <script src="https://js.puter.com/v2/"></script>
+          <button id="run">Run real Interpreter AI request</button>
+          <script>
+          window.__result = { done:false, signed:false, answer:'', error:'' };
+          document.getElementById('run').addEventListener('click', async () => {
+            try {
+              if (!window.puter?.auth?.signIn || !window.puter?.ai?.chat) throw new Error('Puter SDK unavailable');
+              if (!puter.auth.isSignedIn()) await puter.auth.signIn({ attempt_temp_user_creation:true });
+              window.__result.signed = puter.auth.isSignedIn();
+              const response = await puter.ai.chat(
+                [{ role:'user', content:'Reply with exactly INTERPRETER_AI_OK' }],
+                { model:'qwen/qwen3.6-27b', max_tokens:24, temperature:0 }
+              );
+              const content = response?.message?.content;
+              window.__result.answer = typeof content === 'string'
+                ? content.trim()
+                : Array.isArray(content)
+                  ? content.map(x => typeof x === 'string' ? x : (x?.text || '')).join('').trim()
+                  : (typeof response === 'string' ? response.trim() : (response?.text || '').trim());
+            } catch (error) {
+              window.__result.error = error?.msg || error?.message || String(error);
+            } finally {
+              window.__result.done = true;
+            }
+          });
+          </script></body></html>
+          HTML
+
+          python3 -m http.server 8765 --directory /tmp/interpreter-ai-e2e >/tmp/interpreter-ai-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+
+          cat > /tmp/interpreter-ai-e2e/test.cjs <<'NODE'
+          const { chromium } = require('playwright');
+          (async () => {
+            const browser = await chromium.launch({ headless:true });
+            const context = await browser.newContext();
+            const page = await context.newPage();
+            page.on('console', msg => console.log('BROWSER:', msg.text()));
+            page.on('popup', popup => console.log('AUTH POPUP:', popup.url()));
+            await page.goto('http://127.0.0.1:8765', { waitUntil:'networkidle', timeout:60000 });
+            await page.click('#run');
+            await page.waitForFunction(() => window.__result.done === true, null, { timeout:120000 });
+            const result = await page.evaluate(() => window.__result);
+            console.log('INTERPRETER AI RESULT:', JSON.stringify(result));
+            await browser.close();
+            if (result.error) throw new Error(result.error);
+            if (!result.signed) throw new Error('Temporary-user authentication did not complete.');
+            if (!/INTERPRETER_AI_OK/i.test(result.answer || '')) {
+              throw new Error('Qwen did not return the expected real response: ' + result.answer);
+            }
+          })().catch(error => { console.error(error); process.exit(1); });
+          NODE
+
+          cd /tmp/interpreter-ai-e2e
+          node test.cjs

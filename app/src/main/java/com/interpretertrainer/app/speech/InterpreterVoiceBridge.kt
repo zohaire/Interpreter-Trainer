@@ -30,7 +30,7 @@ import kotlin.math.max
  *
  * WebView speech APIs are inconsistent on Android, so microphone recognition and speech output
  * live here instead. Continuous voice mode deliberately filters the coach's own loudspeaker audio
- * before treating a partial recognition as an interruption.
+ * before treating speech as an interruption.
  */
 class InterpreterVoiceBridge(
     context: Context,
@@ -158,7 +158,7 @@ class InterpreterVoiceBridge(
         }
     }
 
-    /** Manual tap while the coach is talking: always interrupt immediately and listen. */
+    /** Manual tap while the coach is talking always interrupts immediately and listens. */
     @JavascriptInterface
     fun manualInterrupt(requestedLanguageTag: String) {
         main.post {
@@ -332,7 +332,11 @@ class InterpreterVoiceBridge(
                 if (continuousMode) scheduleListening(180L)
                 return
             }
-            if (!heardSpeechStart || peakRms < FINAL_BARGE_IN_MIN_RMS) {
+
+            // A single recognition result while the loudspeaker is active is not enough to cut
+            // the coach off. Prefer the repeated partial-result confirmation path. If a speech
+            // service supplies no partials, allow only a clearly deliberate, strong utterance.
+            if (!isStrongFinalBargeIn(text)) {
                 if (continuousMode) scheduleListening(180L)
                 return
             }
@@ -367,12 +371,20 @@ class InterpreterVoiceBridge(
         lastPartial = normalized
         lastPartialAt = now
 
-        if (stablePartialCount >= 2) {
+        if (stablePartialCount >= REQUIRED_STABLE_PARTIALS) {
             acceptBargeIn(text)
         }
     }
 
     override fun onEvent(eventType: Int, params: Bundle?) = Unit
+
+    private fun isStrongFinalBargeIn(text: String): Boolean {
+        if (!heardSpeechStart || peakRms < FINAL_BARGE_IN_MIN_RMS) return false
+        val normalized = normalize(text)
+        if (normalized.length < FINAL_BARGE_IN_MIN_CHARS) return false
+        val words = normalized.split(' ').filter { it.length > 1 }
+        return words.size >= FINAL_BARGE_IN_MIN_WORDS
+    }
 
     private fun acceptBargeIn(text: String) {
         if (bargeInHandled) return
@@ -419,7 +431,7 @@ class InterpreterVoiceBridge(
         if (heardTokens.isEmpty()) return true
         val spokenTokens = spoken.split(' ').toSet()
         val overlap = heardTokens.count { it in spokenTokens }.toFloat() / heardTokens.size.toFloat()
-        return overlap >= 0.72f
+        return overlap >= ECHO_TOKEN_OVERLAP
     }
 
     private fun partialsAgree(previous: String, current: String): Boolean {
@@ -508,8 +520,12 @@ class InterpreterVoiceBridge(
     companion object {
         private const val MIC_PERMISSION_REQUEST = 7312
         private const val PARTIAL_BARGE_IN_MIN_RMS = 3.5f
-        private const val FINAL_BARGE_IN_MIN_RMS = 1.5f
+        private const val FINAL_BARGE_IN_MIN_RMS = 5.0f
+        private const val FINAL_BARGE_IN_MIN_CHARS = 12
+        private const val FINAL_BARGE_IN_MIN_WORDS = 3
+        private const val REQUIRED_STABLE_PARTIALS = 2
         private const val PARTIAL_CONFIRM_WINDOW_MS = 1_100L
+        private const val ECHO_TOKEN_OVERLAP = 0.72f
         private val ARABIC_REGEX = Regex("[\\u0600-\\u06FF]")
         private val FRENCH_HINTS = listOf(" je ", " tu ", " vous ", " est ", " des ", " une ", " dans ", " avec ", " pour ")
     }

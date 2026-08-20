@@ -23,6 +23,33 @@
     .replace(/\s+/g, ' ')
     .trim();
 
+  // WebView can receive many tiny stream chunks inside one display frame. Painting every chunk
+  // forces repeated layout/scroll work and makes the answer look jerky. Keep consuming the model
+  // stream immediately, but update the visible bubble at most once per animation frame.
+  let streamPaintFrame = 0;
+  let pendingStreamBubble = null;
+  let pendingStreamText = '';
+  const paintStreamNow = () => {
+    if (streamPaintFrame) cancelAnimationFrame(streamPaintFrame);
+    streamPaintFrame = 0;
+    if (pendingStreamBubble?.isConnected) pendingStreamBubble.textContent = pendingStreamText;
+    pendingStreamBubble = null;
+    pendingStreamText = '';
+    window.scrollToBottom?.(false);
+  };
+  const scheduleStreamPaint = (bubble, text) => {
+    pendingStreamBubble = bubble;
+    pendingStreamText = text;
+    if (streamPaintFrame) return;
+    streamPaintFrame = requestAnimationFrame(() => {
+      streamPaintFrame = 0;
+      if (pendingStreamBubble?.isConnected) pendingStreamBubble.textContent = pendingStreamText;
+      pendingStreamBubble = null;
+      pendingStreamText = '';
+      window.scrollToBottom?.(false);
+    });
+  };
+
   const setOrb = mode => {
     const orb = document.getElementById('voiceOrb');
     if (!orb) return;
@@ -41,8 +68,6 @@
     const clean = cleanForSpeech(text);
     if (!clean) return false;
 
-    // Interpreter Live never goes through the WebView Proxy/natural-network-TTS path. It calls the
-    // dedicated native bridge directly so playback starts promptly and AEC can monitor the mic.
     if (window.__voiceCallActive && live) {
       try {
         if (live.speakText?.(clean, language) === true) return true;
@@ -107,7 +132,6 @@
     pumpSpeech();
   };
 
-  // Start speaking from a short complete phrase rather than waiting for a long answer/chunk.
   const findCut = (pending, force) => {
     if (!pending) return 0;
     if (force) return pending.length;
@@ -160,8 +184,6 @@
     setOrb('listening');
   };
 
-  // These base callbacks are intentionally simple. interpreter_precise_barge_in.js replaces them
-  // with the full conversational interruption state machine after this file initializes.
   window.__nativeSpeechStarted = () => {
     if (!state.speaking || !window.__voiceCallActive) return;
     setCallStatus('Interpreter AI is speaking', state.streamAnswer || 'You can interrupt me.');
@@ -326,8 +348,7 @@
         if (!chunk) continue;
         answer += chunk;
         state.streamAnswer = answer;
-        if (bubble) bubble.textContent = answer;
-        requestAnimationFrame(scrollToBottom);
+        scheduleStreamPaint(bubble, answer);
         if (voiceResponse) queueReadySpeech(false);
       }
 
@@ -337,6 +358,7 @@
       state.streamAnswer = answer;
       state.streamComplete = true;
       if (voiceResponse) queueReadySpeech(true);
+      paintStreamNow();
 
       streamRow?.remove();
       streamRow = null;
@@ -350,6 +372,10 @@
       pumpSpeech();
     } catch (error) {
       hideTyping();
+      if (streamPaintFrame) cancelAnimationFrame(streamPaintFrame);
+      streamPaintFrame = 0;
+      pendingStreamBubble = null;
+      pendingStreamText = '';
       streamRow?.remove();
       if (error?.__interrupted) return;
       state.queue = [];

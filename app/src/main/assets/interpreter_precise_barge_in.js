@@ -1,9 +1,9 @@
 (() => {
-  if (window.__interpreterPreciseBargeInV1) return 'ready';
+  if (window.__interpreterPreciseBargeInV2) return 'ready';
   const native = window.InterpreterNative;
   const state = window.__fastInterpreterVoiceState;
   if (!native || !state || !window.__fastInterpreterVoiceV3) return 'pending';
-  window.__interpreterPreciseBargeInV1 = true;
+  window.__interpreterPreciseBargeInV2 = true;
 
   const candidate = {
     text: '',
@@ -11,6 +11,8 @@
     startedAt: 0,
     lastAt: 0
   };
+
+  let speechArmGeneration = 0;
 
   const clean = value => String(value || '')
     .toLocaleLowerCase()
@@ -41,13 +43,18 @@
     return matches / Math.max(1, left.length - 1);
   };
 
+  const novelWordCount = value => {
+    const heard = words(value);
+    const spoken = new Set(words((state.speechReference || '') + ' ' + (state.streamAnswer || '')));
+    return heard.filter(word => !spoken.has(word)).length;
+  };
+
   const likelySpeakerEcho = value => {
     const heard = clean(value);
     const spoken = clean((state.speechReference || '') + ' ' + (state.streamAnswer || ''));
     if (!heard || !spoken) return false;
 
-    // Very short recognitions are especially likely to be speaker leakage or random noise.
-    if (heard.length < 4) return true;
+    if (heard.length < 5) return true;
     if (spoken.includes(heard)) return true;
 
     const heardWords = words(heard);
@@ -55,10 +62,14 @@
 
     const coverage = tokenOverlap(heard, spoken);
     const pairCoverage = bigramOverlap(heard, spoken);
+    const novel = novelWordCount(heard);
 
-    if (heardWords.length <= 2) return coverage >= 0.50;
-    if (pairCoverage >= 0.50) return true;
-    return coverage >= 0.68;
+    // Phone-speaker leakage is often re-transcribed imperfectly rather than copied verbatim.
+    // Treat even moderate overlap as echo when the recognizer produced only a short phrase.
+    if (heardWords.length <= 2) return coverage >= 0.34 || novel < 2;
+    if (heardWords.length <= 4 && coverage >= 0.50) return true;
+    if (pairCoverage >= 0.34) return true;
+    return coverage >= 0.58;
   };
 
   const similarCandidate = (a, b) => {
@@ -95,9 +106,15 @@
     const now = Date.now();
     const count = words(text).length;
     const shortCommand = explicitShortCommand(text);
+    const novel = novelWordCount(text);
 
-    // Reject tiny/noisy fragments. Normal interruptions need at least two words.
     if (!shortCommand && (count < 2 || text.length < 6)) {
+      resetCandidate();
+      return false;
+    }
+
+    // A real interruption should introduce something that is not simply the AI's own sentence.
+    if (!shortCommand && ((count <= 3 && novel < 2) || (count >= 4 && novel < 1))) {
       resetCandidate();
       return false;
     }
@@ -114,19 +131,13 @@
 
     const age = now - candidate.startedAt;
     if (shortCommand) {
-      // A one-word command must be repeatedly recognized before it may stop playback.
       return candidate.hits >= 3 && age >= 180;
     }
 
-    if (isFinal) {
-      // A substantial final recognition may confirm an interruption even if Android emitted only
-      // one partial result; shorter finals still require a stable prior partial.
-      if (count >= 3 && text.length >= 10) return true;
-      return candidate.hits >= 2 && age >= 100;
-    }
+    // Crucial real-device guard: a single final recognition is never enough to stop the AI.
+    // Phone-speaker echo can arrive as a polished final phrase even when partials looked harmless.
+    if (isFinal) return candidate.hits >= 2 && age >= 100;
 
-    // Partial results must be stable across multiple recognizer updates. This is the main guard
-    // against random words, room noise and transient speaker echo cutting the AI off.
     return candidate.hits >= 2 && age >= 120;
   };
 
@@ -144,10 +155,38 @@
     if (liveNode && text !== undefined) liveNode.textContent = text;
   };
 
-  const rearmWhileSpeaking = (delay = 260) => {
+  const armAfterSpeechStart = (delay = 680) => {
+    const generation = ++speechArmGeneration;
     resetCandidate();
     state.bargeArmed = false;
     setTimeout(() => {
+      if (generation !== speechArmGeneration) return;
+      if (!window.__voiceCallActive || window.__voiceCallMuted || !state.speaking || state.userBarging) return;
+      state.bargeArmed = true;
+      native.setVoiceLanguage?.(document.getElementById('callVoiceLang')?.value || 'en-US');
+      native.startVoiceInput?.();
+    }, delay);
+  };
+
+  // Replace the aggressive 320 ms arming installed by the low-latency layer. On a real phone,
+  // the first few hundred milliseconds contain the strongest loudspeaker leakage. We still keep
+  // automatic barge-in, but only after the TTS attack has settled. Manual mic interruption remains
+  // immediate because the base voice layer handles that button independently.
+  window.__nativeSpeechStarted = () => {
+    if (!state.speaking) return;
+    if (window.__voiceCallActive) {
+      setStatus('Interpreter AI is speaking', state.streamAnswer || 'You can interrupt at any time.');
+      setOrb('speaking');
+      armAfterSpeechStart(680);
+    }
+  };
+
+  const rearmWhileSpeaking = (delay = 520) => {
+    const generation = ++speechArmGeneration;
+    resetCandidate();
+    state.bargeArmed = false;
+    setTimeout(() => {
+      if (generation !== speechArmGeneration) return;
       if (!window.__voiceCallActive || window.__voiceCallMuted || !state.speaking || state.userBarging) return;
       state.bargeArmed = true;
       native.setVoiceLanguage?.(document.getElementById('callVoiceLang')?.value || 'en-US');
@@ -156,6 +195,7 @@
   };
 
   const interruptForRealSpeech = value => {
+    speechArmGeneration += 1;
     if (!state.userBarging) {
       state.responseId += 1;
       try {
@@ -230,9 +270,7 @@
         interruptForRealSpeech(value);
         continueWithUserTurn(value);
       } else {
-        // Treat unconfirmed speech as echo/noise. The AI keeps talking and the interruption
-        // recognizer is re-armed instead of stopping playback.
-        rearmWhileSpeaking(280);
+        rearmWhileSpeaking(520);
       }
       return;
     }
@@ -243,8 +281,7 @@
     }
 
     if (window.__voiceCallActive && state.speaking) {
-      // A result that arrived outside the armed interruption window must never stop the AI.
-      rearmWhileSpeaking(260);
+      rearmWhileSpeaking(520);
       return;
     }
 
@@ -255,8 +292,7 @@
     window.__voiceInputStopped?.();
     resetCandidate();
     if (window.__voiceCallActive && state.speaking) {
-      // Recognition timeouts/no-match while the AI is talking are normal and must not affect TTS.
-      rearmWhileSpeaking(320);
+      rearmWhileSpeaking(620);
       return;
     }
     if (window.__voiceCallActive) {

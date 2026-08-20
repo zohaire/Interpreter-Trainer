@@ -1,0 +1,49 @@
+name: Test Interpreter Live Voice
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/src/main/assets/interpreter_fast_voice.js'
+      - 'app/src/main/assets/interpreter_precise_barge_in.js'
+      - 'app/src/main/assets/interpreter_live_latency.js'
+      - 'app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt'
+      - 'app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt'
+      - '.github/tests/interpreter-live-conversation.cjs'
+      - '.github/workflows/interpreter-live-voice.yml'
+  pull_request:
+    paths:
+      - 'app/src/main/assets/interpreter_fast_voice.js'
+      - 'app/src/main/assets/interpreter_precise_barge_in.js'
+      - 'app/src/main/assets/interpreter_live_latency.js'
+      - 'app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt'
+      - 'app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt'
+      - '.github/tests/interpreter-live-conversation.cjs'
+      - '.github/workflows/interpreter-live-voice.yml'
+
+jobs:
+  conversation-state-machine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate voice JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check app/src/main/assets/interpreter_fast_voice.js
+          node --check app/src/main/assets/interpreter_precise_barge_in.js
+          node --check app/src/main/assets/interpreter_live_latency.js
+          node --check app/src/main/assets/interpreter_standard_arabic.js
+          node --check .github/tests/interpreter-live-conversation.cjs
+
+      - name: Test ChatGPT-like interruption handoff and latency
+        shell: bash
+        run: node .github/tests/interpreter-live-conversation.cjs

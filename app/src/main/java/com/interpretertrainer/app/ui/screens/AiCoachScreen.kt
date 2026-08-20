@@ -10,6 +10,8 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -25,9 +27,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.WebViewAssetLoader
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.viewmodel.SessionViewModel
 import java.util.Locale
+
+private const val COACH_URL =
+    "https://appassets.androidplatform.net/assets/interpreter_coach.html"
 
 /**
  * Interpreter Coach uses an online Qwen model through Puter.js.
@@ -81,9 +87,9 @@ private class PracticeContextBridge {
 
 @SuppressLint("SetJavaScriptEnabled")
 private fun createCoachWebView(context: Context, bridge: PracticeContextBridge): WebView {
-    val html = context.assets.open("interpreter_coach.html")
-        .bufferedReader(Charsets.UTF_8)
-        .use { it.readText() }
+    val assetLoader = WebViewAssetLoader.Builder()
+        .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
+        .build()
 
     val webView = WebView(context)
     webView.layoutParams = ViewGroup.LayoutParams(
@@ -93,8 +99,18 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
     configureCoachWebView(webView)
     webView.addJavascriptInterface(bridge, "InterpreterNative")
     webView.webViewClient = object : WebViewClient() {
+        override fun shouldInterceptRequest(
+            view: WebView?,
+            request: WebResourceRequest
+        ): WebResourceResponse? {
+            return assetLoader.shouldInterceptRequest(request.url)
+                ?: super.shouldInterceptRequest(view, request)
+        }
+
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
+            if (url != COACH_URL) return
+
             view?.evaluateJavascript(
                 """
                 (() => {
@@ -121,15 +137,10 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
         setAcceptThirdPartyCookies(webView, true)
     }
 
-    // A stable HTTPS origin gives Puter.js normal browser auth/cookie semantics while the page
-    // itself remains bundled with the APK.
-    webView.loadDataWithBaseURL(
-        "https://interpreter-trainer.app/",
-        html,
-        "text/html",
-        "UTF-8",
-        null
-    )
+    // Serve the bundled page through Android's reserved HTTPS app-assets origin. Unlike
+    // loadDataWithBaseURL() with a fake internet domain, this URL survives reloads triggered by
+    // authentication/session code and never leaves the APK for the coach document itself.
+    webView.loadUrl(COACH_URL)
     return webView
 }
 

@@ -25,6 +25,11 @@ jobs:
           node --check app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q 'interpreter_ai_bootstrap.js' app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt
           grep -q 'qwen/qwen3.6-27b' app/src/main/assets/interpreter_coach.html
+          grep -q 'Online AI · ready' app/src/main/assets/interpreter_ai_bootstrap.js
+          if grep -q 'auth.signIn' app/src/main/assets/interpreter_ai_bootstrap.js; then
+            echo 'The injected Android AI bootstrap must not manually sign in.'
+            exit 1
+          fi
 
       - name: Verify Qwen3.6 27B remains in Puter live catalog
         shell: bash
@@ -53,7 +58,7 @@ jobs:
           npm install --silent playwright@1.55.0
           npx playwright install --with-deps chromium
 
-      - name: Test Android coach auth gesture and Qwen request path
+      - name: Test Android coach direct Qwen request path
         shell: bash
         run: |
           set -euo pipefail
@@ -76,21 +81,20 @@ jobs:
                 body: `
                   window.__mockSigned = false;
                   window.__signInCalls = 0;
-                  window.__signInHadUserActivation = false;
                   window.__chatCalls = [];
                   window.puter = {
                     auth: {
                       isSignedIn() { return window.__mockSigned === true; },
                       async signIn() {
                         window.__signInCalls += 1;
-                        window.__signInHadUserActivation = Boolean(navigator.userActivation?.isActive);
-                        window.__mockSigned = true;
-                        return { username: 'temporary-test-user', is_temp: true };
+                        throw new Error('Manual signIn must not be used by the Android bootstrap');
                       }
                     },
                     ai: {
                       async chat(messages, options) {
-                        window.__chatCalls.push({ messages, options });
+                        window.__chatCalls.push({ messages, options, userActivation:Boolean(navigator.userActivation?.isActive) });
+                        // Simulate Puter's documented automatic authentication on the first cloud call.
+                        window.__mockSigned = true;
                         return { message: { content: 'INTERPRETER_AI_OK' } };
                       },
                       async txt2speech() { throw new Error('not used in this test'); }
@@ -109,18 +113,17 @@ jobs:
               process.env.GITHUB_WORKSPACE,
               'app/src/main/assets/interpreter_ai_bootstrap.js'
             );
-            const bootstrapResult = await page.addScriptTag({ path: bootstrap });
-            await page.waitForTimeout(400);
+            await page.addScriptTag({ path: bootstrap });
+            await page.waitForTimeout(350);
 
-            const automaticAuthCalls = await page.evaluate(() => window.__signInCalls);
-            if (automaticAuthCalls !== 0) {
-              throw new Error(`AI authentication started without a user gesture (${automaticAuthCalls} calls).`);
-            }
-
-            const initialStatus = await page.locator('#statusText').textContent();
-            if (!/send to start|online/i.test(initialStatus || '')) {
-              throw new Error(`Unexpected initial AI status: ${initialStatus}`);
-            }
+            const before = await page.evaluate(() => ({
+              signInCalls: window.__signInCalls,
+              chatCalls: window.__chatCalls.length,
+              status: document.getElementById('statusText')?.textContent || ''
+            }));
+            if (before.signInCalls !== 0) throw new Error('Manual authentication ran before a request.');
+            if (before.chatCalls !== 0) throw new Error('AI generated a request before the user sent anything.');
+            if (!/online ai.*ready/i.test(before.status)) throw new Error(`Unexpected initial AI status: ${before.status}`);
 
             await page.fill('#chatInput', 'Confirm the interpreter coach works.');
             await page.click('#sendBtn');
@@ -133,19 +136,17 @@ jobs:
 
             const first = await page.evaluate(() => ({
               signInCalls: window.__signInCalls,
-              userActivation: window.__signInHadUserActivation,
               chatCalls: window.__chatCalls,
               status: document.getElementById('statusText')?.textContent || '',
               error: document.getElementById('chatError')?.textContent || ''
             }));
 
-            if (first.signInCalls !== 1) throw new Error(`Expected one auth attempt, got ${first.signInCalls}.`);
-            if (!first.userActivation) throw new Error('Puter signIn was not initiated under a real user activation.');
+            if (first.signInCalls !== 0) throw new Error(`Manual signIn was called ${first.signInCalls} times.`);
             if (first.chatCalls.length !== 1) throw new Error(`Expected one AI request, got ${first.chatCalls.length}.`);
             if (first.chatCalls[0]?.options?.model !== 'qwen/qwen3.6-27b') {
               throw new Error(`Wrong AI model: ${first.chatCalls[0]?.options?.model}`);
             }
-            if (!/online/i.test(first.status)) throw new Error(`AI did not reach online state: ${first.status}`);
+            if (!/online/i.test(first.status)) throw new Error(`AI did not stay online: ${first.status}`);
             if (first.error) throw new Error(`Unexpected visible AI error: ${first.error}`);
 
             await page.fill('#chatInput', 'Second message.');
@@ -153,13 +154,15 @@ jobs:
             await page.waitForFunction(() => window.__chatCalls.length === 2, null, { timeout: 10000 });
             const second = await page.evaluate(() => ({
               signInCalls: window.__signInCalls,
-              chatCalls: window.__chatCalls.length
+              chatCalls: window.__chatCalls.length,
+              signed: window.__mockSigned
             }));
-            if (second.signInCalls !== 1) throw new Error('AI re-authenticated unnecessarily on the second message.');
+            if (second.signInCalls !== 0) throw new Error('The second message attempted manual authentication.');
             if (second.chatCalls !== 2) throw new Error('Second AI message did not reach the provider path.');
+            if (!second.signed) throw new Error('Provider-managed session was not retained.');
 
             await browser.close();
-            console.log('Interpreter AI browser integration passed: no background popup, auth under Send gesture, Qwen3.6 27B request, visible response, reusable session.');
+            console.log('Interpreter AI integration passed: provider loaded, no manual auth popup, direct Qwen3.6 27B request, visible response, reusable session.');
           })().catch(error => {
             console.error(error);
             process.exit(1);

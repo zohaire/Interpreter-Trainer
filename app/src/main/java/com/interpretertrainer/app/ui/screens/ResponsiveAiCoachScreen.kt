@@ -1,5 +1,6 @@
 package com.interpretertrainer.app.ui.screens
 
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
@@ -81,6 +82,7 @@ fun ResponsiveAiCoachScreen(
         repeat(140) {
             val webView = findCoachWebView(rootView)
             if (webView != null) {
+                ensureCoachTouchRouting(webView)
                 if (attachedWebView.value !== webView) {
                     // JavascriptInterface objects are exposed to JavaScript after a navigation.
                     // Attach the optional duplex bridge once and reload the bundled coach once.
@@ -126,6 +128,7 @@ fun ResponsiveAiCoachScreen(
 
                     // Re-apply touch behavior after optional layers in case they replaced handlers.
                     runCatching { webView.evaluateJavascript(forceTouchableVoiceUiScript(), null) }
+                    runCatching { webView.evaluateJavascript(fullTouchRecoveryScript(), null) }
 
                     if (evaluateForResult(webView, voiceUiReadyScript())) {
                         return@LaunchedEffect
@@ -150,6 +153,35 @@ private fun findCoachWebView(view: View): WebView? {
         }
     }
     return null
+}
+
+/**
+ * Compose and Android WebView can otherwise compete for the same gesture stream on some devices.
+ * Keep the WebView focused and disallow parent interception only for the lifetime of an active
+ * gesture. Returning false is important: WebView still receives and processes the touch itself.
+ */
+private fun ensureCoachTouchRouting(webView: WebView) {
+    webView.isEnabled = true
+    webView.isClickable = true
+    webView.isLongClickable = true
+    webView.isFocusable = true
+    webView.isFocusableInTouchMode = true
+    webView.setOnTouchListener { view, event ->
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                view.requestFocusFromTouch()
+                view.parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                view.parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_CANCEL -> {
+                view.parent?.requestDisallowInterceptTouchEvent(false)
+            }
+        }
+        false
+    }
 }
 
 private fun coachDomReadyScript(): String = """
@@ -303,6 +335,37 @@ private fun forceTouchableVoiceUiScript(): String = """
 })();
 """.trimIndent()
 
+/**
+ * A hidden full-screen layer must never be allowed to absorb taps. This also repairs any element
+ * whose pointer-events style was left disabled by an interrupted WebView/bootstrap pass.
+ */
+private fun fullTouchRecoveryScript(): String = """
+(() => {
+  document.documentElement.style.pointerEvents = 'auto';
+  document.body.style.pointerEvents = 'auto';
+  document.querySelector('.app')?.style.setProperty('pointer-events', 'auto');
+
+  document.querySelectorAll('.voice-call-overlay').forEach(overlay => {
+    overlay.style.pointerEvents = overlay.classList.contains('active') ? 'auto' : 'none';
+  });
+
+  document.querySelectorAll('button:not(:disabled), textarea, input, select, [role="button"]').forEach(node => {
+    node.style.pointerEvents = 'auto';
+    if (node.tagName === 'BUTTON' || node.getAttribute('role') === 'button') {
+      node.style.touchAction = 'manipulation';
+    }
+  });
+
+  const input = document.getElementById('chatInput');
+  if (input) {
+    input.readOnly = false;
+    input.style.pointerEvents = 'auto';
+    input.style.touchAction = 'auto';
+  }
+  return 'ready';
+})();
+""".trimIndent()
+
 private fun voiceUiReadyScript(): String = """
 (() => {
   const ids = ['voiceLang','voiceBtn','voiceCallLaunch'];
@@ -340,7 +403,7 @@ private fun themeSyncScript(darkTheme: Boolean): String = if (darkTheme) {
         '--bg':'#fbfbfd','--surface':'#ffffff','--soft':'#f2f3f7','--surface-soft':'#f2f3f7',
         '--surface-strong':'#e8eaf0','--text':'#17181c','--muted':'#727680','--faint':'#9b9fa8',
         '--accent':'#4b4ee8','--accent2':'#7b5cff','--accent-soft':'#eeeeff','--accent-ink':'#3539c8',
-        '--border':'#e6e7ec','--danger':'#c9362b','--ok':'#138a55','--user':'#eff0f4',
+        '--border':'#e6e7ec','--danger':'#c9362b','--ok':'#76dfa8','--user':'#eff0f4',
         '--shadow':'0 18px 55px rgba(25,27,40,.10)'
       };
       Object.entries(values).forEach(([key,value]) => root.style.setProperty(key,value));

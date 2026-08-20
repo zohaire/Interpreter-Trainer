@@ -177,13 +177,14 @@
   if (endButton) endButton.onclick = window.endVoiceCall;
 
   // ---------------------------------------------------------------------------
-  // Online TTS fallback for phones with no usable Android TTS engine.
+  // Online TTS fallback for phones with no usable Android TTS engine. Use Puter's documented
+  // OpenAI TTS engine/voice IDs so this path does not depend on provider-specific voice aliases.
   // ---------------------------------------------------------------------------
   let onlineVoiceAudio = null;
   const onlineProfiles = {
-    'en-US': { provider:'xai', voice:'sal', language:'auto', output_format:'mp3' },
-    'fr-FR': { provider:'xai', voice:'eve', language:'auto', output_format:'mp3' },
-    'ar-MA': { provider:'xai', voice:'ara', language:'auto', output_format:'mp3' }
+    'en-US': { provider:'openai', model:'gpt-4o-mini-tts', voice:'alloy', response_format:'mp3', instructions:'Natural, concise interpreter-coach voice. Speak the supplied text in its original language.' },
+    'fr-FR': { provider:'openai', model:'gpt-4o-mini-tts', voice:'coral', response_format:'mp3', instructions:'Natural French-speaking interpreter-coach voice. Keep pronunciation clear and conversational.' },
+    'ar-MA': { provider:'openai', model:'gpt-4o-mini-tts', voice:'alloy', response_format:'mp3', instructions:'Natural Modern Standard Arabic interpreter-coach voice. Keep pronunciation clear and conversational.' }
   };
 
   window.__stopOnlineVoice = () => {
@@ -255,7 +256,7 @@
         scrollFrame = 0;
         const scroll = document.getElementById('chatScroll');
         if (!scroll) return;
-        const smooth = requestedSmooth && !window.__voiceCallActive && !window.busy;
+        const smooth = requestedSmooth && !window.__voiceCallActive;
         requestedSmooth = false;
         if (smooth) scroll.scrollTo({ top: scroll.scrollHeight, behavior:'smooth' });
         else scroll.scrollTop = scroll.scrollHeight;

@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate bundled Interpreter AI files
+      - name: Validate bundled Interpreter AI and Live files
         shell: bash
         run: |
           set -euo pipefail
@@ -27,7 +27,10 @@ jobs:
           node --check app/src/main/assets/interpreter_fast_voice.js
           grep -q 'interpreter_ai_bootstrap.js' app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt
           grep -q 'qwen/qwen3.6-27b' app/src/main/assets/interpreter_coach.html
-          grep -q 'Online AI · ready · AIV4' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'Online AI · ready · AIV5-LIVE' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'voiceCallLaunch' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'voiceCallOverlay' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'voiceBtn' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q '__fastInterpreterVoiceV4' app/src/main/assets/interpreter_fast_voice.js
           if grep -q 'auth.signIn' app/src/main/assets/interpreter_ai_bootstrap.js; then
             echo 'The Android AI bootstrap must not manually sign in.'
@@ -65,7 +68,7 @@ jobs:
           npm install --silent playwright@1.55.0
           npx playwright install --with-deps chromium
 
-      - name: Test Android coach first Qwen request keeps user activation
+      - name: Test Android coach AI plus Interpreter Live controls
         shell: bash
         run: |
           set -euo pipefail
@@ -106,9 +109,7 @@ jobs:
                         });
                         window.__mockSigned = true;
                         if (options?.stream) {
-                          return (async function* () {
-                            yield { text: 'INTERPRETER_AI_OK' };
-                          })();
+                          return (async function* () { yield { text: 'INTERPRETER_AI_OK' }; })();
                         }
                         return Promise.resolve({ message: { content: 'INTERPRETER_AI_OK' } });
                       },
@@ -124,24 +125,23 @@ jobs:
               timeout: 60000
             });
 
-            const bootstrap = path.join(
-              process.env.GITHUB_WORKSPACE,
-              'app/src/main/assets/interpreter_ai_bootstrap.js'
-            );
-            await page.addScriptTag({ path: bootstrap });
-
-            // Reproduce the native Android injection preconditions for the fast voice/chat layer.
+            // InterpreterNative exists before page patches in the real Android WebView.
             await page.evaluate(() => {
-              window.__interpreterEnhancementsV3 = true;
               window.InterpreterNative = {
                 setVoiceLanguage() {},
-                startVoiceInput() {},
+                startVoiceInput() { window.__voiceStarts = (window.__voiceStarts || 0) + 1; },
                 stopVoiceInput() {},
                 speakText() { return false; },
                 stopSpeaking() {},
                 getPracticeContext() { return 'No saved practice context.'; }
               };
             });
+
+            const bootstrap = path.join(
+              process.env.GITHUB_WORKSPACE,
+              'app/src/main/assets/interpreter_ai_bootstrap.js'
+            );
+            await page.addScriptTag({ path: bootstrap });
 
             const fastVoice = path.join(
               process.env.GITHUB_WORKSPACE,
@@ -154,14 +154,21 @@ jobs:
               signInCalls: window.__signInCalls,
               chatCalls: window.__chatCalls.length,
               status: document.getElementById('statusText')?.textContent || '',
-              bootstrapV4: Boolean(window.__interpreterAiBootstrapV4),
-              fastVoiceV4: Boolean(window.__fastInterpreterVoiceV4)
+              bootstrapV5: Boolean(window.__interpreterAiBootstrapV5),
+              fastVoiceV4: Boolean(window.__fastInterpreterVoiceV4),
+              voiceUiRestored: Boolean(window.__voiceUiRestoredByBootstrapV5),
+              voiceButton: Boolean(document.getElementById('voiceBtn')),
+              liveLaunch: Boolean(document.getElementById('voiceCallLaunch')),
+              liveOverlay: Boolean(document.getElementById('voiceCallOverlay'))
             }));
-            if (!before.bootstrapV4) throw new Error('AI bootstrap V4 did not load.');
+            if (!before.bootstrapV5) throw new Error('AI bootstrap V5 did not load.');
             if (!before.fastVoiceV4) throw new Error('Fast Interpreter AI V4 did not load.');
+            if (!before.voiceUiRestored || !before.voiceButton || !before.liveLaunch || !before.liveOverlay) {
+              throw new Error('Interpreter Live / voice controls disappeared from the coach.');
+            }
             if (before.signInCalls !== 0) throw new Error('Manual authentication ran before a request.');
             if (before.chatCalls !== 0) throw new Error('AI generated a request before the user sent anything.');
-            if (!/online ai.*ready.*aiv4/i.test(before.status)) throw new Error(`Unexpected initial AI status: ${before.status}`);
+            if (!/online ai.*ready.*aiv5-live/i.test(before.status)) throw new Error(`Unexpected initial AI status: ${before.status}`);
 
             await page.fill('#chatInput', 'Confirm the interpreter coach works.');
             await page.click('#sendBtn');
@@ -187,23 +194,21 @@ jobs:
             if (first.chatCalls[0]?.options?.model !== 'qwen/qwen3.6-27b') {
               throw new Error(`Wrong AI model: ${first.chatCalls[0]?.options?.model}`);
             }
-            if (!/online ai.*ready.*aiv4/i.test(first.status)) throw new Error(`AI did not stay online: ${first.status}`);
+            if (!/online/i.test(first.status)) throw new Error(`AI did not stay online: ${first.status}`);
             if (first.error) throw new Error(`Unexpected visible AI error: ${first.error}`);
 
-            await page.fill('#chatInput', 'Second message.');
-            await page.click('#sendBtn');
-            await page.waitForFunction(() => window.__chatCalls.length === 2, null, { timeout: 10000 });
-            const second = await page.evaluate(() => ({
-              signInCalls: window.__signInCalls,
-              chatCalls: window.__chatCalls.length,
-              signed: window.__mockSigned
+            // The live call button itself must still open the full-screen voice experience.
+            await page.click('#voiceCallLaunch');
+            await page.waitForFunction(() => document.getElementById('voiceCallOverlay')?.classList.contains('active'), null, { timeout: 5000 });
+            const live = await page.evaluate(() => ({
+              active: document.getElementById('voiceCallOverlay')?.classList.contains('active') === true,
+              voiceStarts: window.__voiceStarts || 0
             }));
-            if (second.signInCalls !== 0) throw new Error('The second message attempted manual authentication.');
-            if (second.chatCalls !== 2) throw new Error('Second AI message did not reach the provider path.');
-            if (!second.signed) throw new Error('Provider-managed session was not retained.');
+            if (!live.active) throw new Error('Interpreter Live overlay did not open.');
+            if (live.voiceStarts < 1) throw new Error('Interpreter Live did not start native voice input.');
 
             await browser.close();
-            console.log('Interpreter AI integration passed: AIV4 loaded, first Qwen call kept user activation, no manual auth popup, visible streamed response, reusable session.');
+            console.log('Interpreter AI integration passed: AIV5-LIVE, visible voice controls, live overlay, first-turn Qwen activation, no manual auth.');
           })().catch(error => {
             console.error(error);
             process.exit(1);

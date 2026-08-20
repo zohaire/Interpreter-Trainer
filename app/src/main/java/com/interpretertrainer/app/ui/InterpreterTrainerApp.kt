@@ -65,9 +65,10 @@ fun InterpreterTrainerApp(
             )
         }
         composable(Routes.AI_COACH) {
-            AiCoachScreen(
+            ResponsiveAiCoachScreen(
                 onBack = navController::popBackStack,
-                sessionViewModel = sessionViewModel
+                sessionViewModel = sessionViewModel,
+                themeMode = themeMode
             )
         }
         composable(Routes.HISTORY) { HistoryScreen(onBack = navController::popBackStack, sessionViewModel) { id -> navController.navigate("history/$id") } }

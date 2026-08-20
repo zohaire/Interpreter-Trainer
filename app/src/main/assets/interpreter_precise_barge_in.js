@@ -1,18 +1,25 @@
 (() => {
-  if (window.__interpreterPreciseBargeInV2) return 'ready';
+  if (window.__interpreterConversationalBargeInV3) return 'ready';
   const native = window.InterpreterNative;
   const state = window.__fastInterpreterVoiceState;
   if (!native || !state || !window.__fastInterpreterVoiceV3) return 'pending';
-  window.__interpreterPreciseBargeInV2 = true;
+  window.__interpreterConversationalBargeInV3 = true;
 
-  const candidate = {
-    text: '',
-    hits: 0,
-    startedAt: 0,
-    lastAt: 0
+  // Keep the fast layer's chunk-pumping callback. We wrap it instead of replacing the speech queue.
+  const baseSpeechFinished = window.__nativeSpeechFinished;
+  const baseStartVoiceCall = window.startVoiceCall;
+  const baseEndVoiceCall = window.endVoiceCall;
+
+  const turn = {
+    phase: 'idle', // idle | listening | thinking | speaking | barge-listening
+    candidate: '',
+    candidateHits: 0,
+    candidateStartedAt: 0,
+    candidateLastAt: 0,
+    lastBargeText: '',
+    armGeneration: 0
   };
-
-  let speechArmGeneration = 0;
+  window.__interpreterLiveTurnState = turn;
 
   const clean = value => String(value || '')
     .toLocaleLowerCase()
@@ -43,33 +50,34 @@
     return matches / Math.max(1, left.length - 1);
   };
 
-  const novelWordCount = value => {
+  const spokenReference = () => clean((state.speechReference || '') + ' ' + (state.streamAnswer || ''));
+
+  const novelty = value => {
     const heard = words(value);
-    const spoken = new Set(words((state.speechReference || '') + ' ' + (state.streamAnswer || '')));
-    return heard.filter(word => !spoken.has(word)).length;
+    if (!heard.length) return { count: 0, ratio: 0 };
+    const spoken = new Set(words(spokenReference()));
+    const novelCount = heard.filter(word => !spoken.has(word)).length;
+    return { count: novelCount, ratio: novelCount / heard.length };
   };
 
   const likelySpeakerEcho = value => {
     const heard = clean(value);
-    const spoken = clean((state.speechReference || '') + ' ' + (state.streamAnswer || ''));
+    const spoken = spokenReference();
     if (!heard || !spoken) return false;
-
     if (heard.length < 5) return true;
     if (spoken.includes(heard)) return true;
 
     const heardWords = words(heard);
-    if (!heardWords.length) return true;
-
     const coverage = tokenOverlap(heard, spoken);
     const pairCoverage = bigramOverlap(heard, spoken);
-    const novel = novelWordCount(heard);
+    const novel = novelty(heard);
 
-    // Phone-speaker leakage is often re-transcribed imperfectly rather than copied verbatim.
-    // Treat even moderate overlap as echo when the recognizer produced only a short phrase.
-    if (heardWords.length <= 2) return coverage >= 0.34 || novel < 2;
-    if (heardWords.length <= 4 && coverage >= 0.50) return true;
-    if (pairCoverage >= 0.34) return true;
-    return coverage >= 0.58;
+    // Real phone-speaker echo is often re-transcribed imperfectly, so use semantic/token overlap
+    // rather than requiring an exact copy of the AI sentence.
+    if (heardWords.length <= 2) return coverage >= 0.34 || novel.count < 2;
+    if (heardWords.length <= 4 && coverage >= 0.52) return true;
+    if (pairCoverage >= 0.40) return true;
+    return coverage >= 0.62;
   };
 
   const similarCandidate = (a, b) => {
@@ -77,26 +85,23 @@
     const right = clean(b);
     if (!left || !right) return false;
     if (left === right || left.startsWith(right) || right.startsWith(left)) return true;
-    return tokenOverlap(left, right) >= 0.65;
+    return tokenOverlap(left, right) >= 0.62;
   };
 
   const resetCandidate = () => {
-    candidate.text = '';
-    candidate.hits = 0;
-    candidate.startedAt = 0;
-    candidate.lastAt = 0;
+    turn.candidate = '';
+    turn.candidateHits = 0;
+    turn.candidateStartedAt = 0;
+    turn.candidateLastAt = 0;
   };
 
-  const explicitShortCommand = value => {
-    const text = clean(value);
-    return new Set([
-      'stop', 'wait', 'hold on', 'one second',
-      'attends', 'attendez', 'stoppe', 'une seconde',
-      'توقف', 'توقفي', 'انتظر', 'انتظري', 'لحظة', 'ثانية'
-    ]).has(text);
-  };
+  const explicitShortCommand = value => new Set([
+    'stop', 'wait', 'hold on', 'one second',
+    'attends', 'attendez', 'stoppe', 'une seconde',
+    'توقف', 'توقفي', 'انتظر', 'انتظري', 'لحظة', 'ثانية'
+  ]).has(clean(value));
 
-  const observeIntentionalSpeech = (value, isFinal = false) => {
+  const observeInterruption = (value, isFinal = false) => {
     const text = clean(value);
     if (!text || likelySpeakerEcho(text)) {
       resetCandidate();
@@ -106,39 +111,39 @@
     const now = Date.now();
     const count = words(text).length;
     const shortCommand = explicitShortCommand(text);
-    const novel = novelWordCount(text);
+    const novel = novelty(text);
 
     if (!shortCommand && (count < 2 || text.length < 6)) {
       resetCandidate();
       return false;
     }
-
-    // A real interruption should introduce something that is not simply the AI's own sentence.
-    if (!shortCommand && ((count <= 3 && novel < 2) || (count >= 4 && novel < 1))) {
+    if (!shortCommand && count <= 3 && novel.count < 2) {
       resetCandidate();
       return false;
     }
 
-    if (candidate.text && similarCandidate(candidate.text, text) && now - candidate.lastAt <= 900) {
-      candidate.hits += 1;
+    if (turn.candidate && similarCandidate(turn.candidate, text) && now - turn.candidateLastAt <= 900) {
+      turn.candidateHits += 1;
     } else {
-      candidate.text = text;
-      candidate.hits = 1;
-      candidate.startedAt = now;
+      turn.candidate = text;
+      turn.candidateHits = 1;
+      turn.candidateStartedAt = now;
     }
-    candidate.lastAt = now;
-    candidate.text = text;
+    turn.candidateLastAt = now;
+    turn.candidate = text;
 
-    const age = now - candidate.startedAt;
-    if (shortCommand) {
-      return candidate.hits >= 3 && age >= 180;
+    const age = now - turn.candidateStartedAt;
+    if (shortCommand) return turn.candidateHits >= 2 && age >= 70;
+
+    // Two consistent recognizer updates make interruption fast without reacting to one noise hit.
+    if (turn.candidateHits >= 2 && age >= 65) return true;
+
+    // Some Android recognizers emit almost no partials. A highly novel, substantial final result
+    // is therefore allowed to interrupt immediately.
+    if (isFinal && count >= 4 && text.length >= 14 && novel.ratio >= 0.68 && tokenOverlap(text, spokenReference()) < 0.22) {
+      return true;
     }
-
-    // Crucial real-device guard: a single final recognition is never enough to stop the AI.
-    // Phone-speaker echo can arrive as a polished final phrase even when partials looked harmless.
-    if (isFinal) return candidate.hits >= 2 && age >= 100;
-
-    return candidate.hits >= 2 && age >= 120;
+    return false;
   };
 
   const setOrb = mode => {
@@ -155,69 +160,7 @@
     if (liveNode && text !== undefined) liveNode.textContent = text;
   };
 
-  const armAfterSpeechStart = (delay = 680) => {
-    const generation = ++speechArmGeneration;
-    resetCandidate();
-    state.bargeArmed = false;
-    setTimeout(() => {
-      if (generation !== speechArmGeneration) return;
-      if (!window.__voiceCallActive || window.__voiceCallMuted || !state.speaking || state.userBarging) return;
-      state.bargeArmed = true;
-      native.setVoiceLanguage?.(document.getElementById('callVoiceLang')?.value || 'en-US');
-      native.startVoiceInput?.();
-    }, delay);
-  };
-
-  // Replace the aggressive 320 ms arming installed by the low-latency layer. On a real phone,
-  // the first few hundred milliseconds contain the strongest loudspeaker leakage. We still keep
-  // automatic barge-in, but only after the TTS attack has settled. Manual mic interruption remains
-  // immediate because the base voice layer handles that button independently.
-  window.__nativeSpeechStarted = () => {
-    if (!state.speaking) return;
-    if (window.__voiceCallActive) {
-      setStatus('Interpreter AI is speaking', state.streamAnswer || 'You can interrupt at any time.');
-      setOrb('speaking');
-      armAfterSpeechStart(680);
-    }
-  };
-
-  const rearmWhileSpeaking = (delay = 520) => {
-    const generation = ++speechArmGeneration;
-    resetCandidate();
-    state.bargeArmed = false;
-    setTimeout(() => {
-      if (generation !== speechArmGeneration) return;
-      if (!window.__voiceCallActive || window.__voiceCallMuted || !state.speaking || state.userBarging) return;
-      state.bargeArmed = true;
-      native.setVoiceLanguage?.(document.getElementById('callVoiceLang')?.value || 'en-US');
-      native.startVoiceInput?.();
-    }, delay);
-  };
-
-  const interruptForRealSpeech = value => {
-    speechArmGeneration += 1;
-    if (!state.userBarging) {
-      state.responseId += 1;
-      try {
-        if (busy) {
-          busy = false;
-          hideTyping?.();
-          updateSendState?.();
-        }
-      } catch (_) {}
-    }
-
-    state.userBarging = true;
-    state.bargeArmed = false;
-    state.queue = [];
-    state.streamComplete = true;
-    resetCandidate();
-    try { native.stopSpeaking?.(); } catch (_) {}
-    try { window.stopNaturalInterpreterVoice?.(); } catch (_) {}
-    state.speaking = false;
-    setStatus('Listening…', value || 'Go ahead.');
-    setOrb('listening');
-  };
+  const callLanguage = () => document.getElementById('callVoiceLang')?.value || 'en-US';
 
   const writeInput = value => {
     const input = document.getElementById('chatInput');
@@ -228,32 +171,149 @@
     return true;
   };
 
-  const continueWithUserTurn = value => {
-    if (!writeInput(value)) return;
+  const cancelOldAiResponse = () => {
+    // The streaming loop in interpreter_fast_voice.js checks responseId on every chunk.
+    state.responseId += 1;
+    try {
+      if (typeof busy !== 'undefined' && busy) {
+        busy = false;
+        hideTyping?.();
+        updateSendState?.();
+      }
+    } catch (_) {}
+  };
+
+  const beginBargeListening = value => {
+    const heard = String(value || '').trim();
+    if (turn.phase === 'barge-listening') {
+      if (heard) turn.lastBargeText = heard;
+      setStatus('Listening…', turn.lastBargeText || 'Keep speaking');
+      setOrb('listening');
+      return;
+    }
+
+    turn.armGeneration += 1;
+    cancelOldAiResponse();
+    state.userBarging = true;
+    state.bargeArmed = false;
+    state.queue = [];
+    state.streamComplete = true;
+    state.speaking = false;
+    turn.phase = 'barge-listening';
+    turn.lastBargeText = heard;
+    resetCandidate();
+
+    // This is the crucial ChatGPT-like handoff: stop only the AI OUTPUT. Do not cancel speech
+    // recognition. The microphone stays on until Android produces the user's final utterance.
+    try { native.stopSpeaking?.(); } catch (_) {}
+    try { window.stopNaturalInterpreterVoice?.(); } catch (_) {}
+
+    setStatus('Listening…', turn.lastBargeText || 'Go ahead — I am listening.');
+    setOrb('listening');
+  };
+
+  const submitCompletedTurn = value => {
+    const text = String(value || turn.lastBargeText || '').trim();
+    if (!text || !writeInput(text)) return;
+
+    turn.phase = 'thinking';
+    turn.lastBargeText = '';
+    state.userBarging = false;
+    state.bargeArmed = false;
+    resetCandidate();
+
     window.__voiceAutoSpeak = true;
     window.__voiceOneShot = !window.__voiceCallActive;
     if (window.__voiceCallActive) {
-      setStatus('Thinking…', value);
+      setStatus('Thinking…', text);
       setOrb(null);
     }
-    state.userBarging = false;
-    resetCandidate();
     window.sendChat?.(true);
+  };
+
+  const armInterruptionListening = (delay = 200) => {
+    const generation = ++turn.armGeneration;
+    resetCandidate();
+    state.bargeArmed = false;
+    setTimeout(() => {
+      if (generation !== turn.armGeneration) return;
+      if (!window.__voiceCallActive || window.__voiceCallMuted || !state.speaking || state.userBarging) return;
+      turn.phase = 'speaking';
+      state.bargeArmed = true;
+      native.setVoiceLanguage?.(callLanguage());
+      native.startVoiceInput?.();
+    }, delay);
+  };
+
+  const rearmWhileSpeaking = (delay = 190) => {
+    if (!state.speaking || state.userBarging) return;
+    armInterruptionListening(delay);
+  };
+
+  // The fast speech layer used a slower/less explicit interruption policy. Replace only its
+  // callbacks; keep its stream and speech queue intact.
+  window.__nativeSpeechStarted = () => {
+    if (!state.speaking) return;
+    turn.phase = 'speaking';
+    if (!window.__voiceCallActive) return;
+    setStatus('Interpreter AI is speaking', state.streamAnswer || 'You can interrupt me while I speak.');
+    setOrb('speaking');
+    armInterruptionListening(200);
+  };
+
+  window.__nativeSpeechFinished = () => {
+    // If the user has interrupted, a late TTS completion callback must never cancel their mic.
+    if (turn.phase === 'barge-listening' || state.userBarging) return;
+    turn.armGeneration += 1;
+    baseSpeechFinished?.();
+  };
+
+  window.__voiceInputStarted = () => {
+    const mic = document.getElementById('voiceBtn');
+    mic?.classList.add('listening');
+    if (mic) mic.title = 'Listening…';
+    const error = document.getElementById('chatError');
+    if (error) error.textContent = '';
+
+    if (!window.__voiceCallActive) return;
+    if (turn.phase === 'barge-listening') {
+      setStatus('Listening…', turn.lastBargeText || 'Keep speaking');
+      setOrb('listening');
+    } else if (!state.speaking) {
+      turn.phase = 'listening';
+      setStatus('Listening…', 'Speak now');
+      setOrb('listening');
+    }
+  };
+
+  window.__voiceInputStopped = () => {
+    const mic = document.getElementById('voiceBtn');
+    mic?.classList.remove('listening');
+    if (mic) mic.title = 'Ask by voice';
   };
 
   window.__voiceInputPartial = text => {
     const value = String(text || '').trim();
     if (!value) return;
 
+    // Once interruption begins, partials only update the live transcript. They NEVER trigger an
+    // AI request. The request waits for the final utterance so the user can finish adding context.
+    if (window.__voiceCallActive && turn.phase === 'barge-listening') {
+      turn.lastBargeText = value;
+      setStatus('Listening…', value);
+      setOrb('listening');
+      return;
+    }
+
     if (window.__voiceCallActive && state.bargeArmed && state.speaking) {
-      if (observeIntentionalSpeech(value, false)) {
-        interruptForRealSpeech(value);
-      }
+      if (observeInterruption(value, false)) beginBargeListening(value);
       return;
     }
 
     if (window.__voiceCallActive) {
+      turn.phase = 'listening';
       setStatus('Listening…', value);
+      setOrb('listening');
       return;
     }
 
@@ -265,49 +325,123 @@
     const value = String(text || '').trim();
     if (!value) return;
 
+    if (window.__voiceCallActive && turn.phase === 'barge-listening') {
+      submitCompletedTurn(value);
+      return;
+    }
+
     if (window.__voiceCallActive && state.bargeArmed && state.speaking) {
-      if (observeIntentionalSpeech(value, true)) {
-        interruptForRealSpeech(value);
-        continueWithUserTurn(value);
+      if (observeInterruption(value, true)) {
+        // This recognizer has already delivered the complete utterance, so stop output and submit
+        // it immediately. When partials trigger first, the path above waits for this final result.
+        beginBargeListening(value);
+        submitCompletedTurn(value);
       } else {
-        rearmWhileSpeaking(520);
+        rearmWhileSpeaking(190);
       }
       return;
     }
 
     if (window.__voiceCallActive && state.userBarging) {
-      continueWithUserTurn(value);
+      submitCompletedTurn(value);
       return;
     }
 
     if (window.__voiceCallActive && state.speaking) {
-      rearmWhileSpeaking(520);
+      // Monitoring result not proven to be the user: it is speaker echo/noise. Keep talking.
+      rearmWhileSpeaking(190);
       return;
     }
 
-    continueWithUserTurn(value);
+    submitCompletedTurn(value);
   };
 
   window.__voiceInputError = message => {
     window.__voiceInputStopped?.();
     resetCandidate();
-    if (window.__voiceCallActive && state.speaking) {
-      rearmWhileSpeaking(620);
+
+    if (window.__voiceCallActive && turn.phase === 'barge-listening') {
+      const fallback = String(turn.lastBargeText || '').trim();
+      // Recognition timeout normally means the user has stopped speaking. Preserve the stable
+      // partial instead of losing the whole interruption.
+      if (words(fallback).length >= 2) {
+        submitCompletedTurn(fallback);
+      } else {
+        native.setVoiceLanguage?.(callLanguage());
+        setTimeout(() => {
+          if (window.__voiceCallActive && turn.phase === 'barge-listening') native.startVoiceInput?.();
+        }, 90);
+      }
       return;
     }
+
+    if (window.__voiceCallActive && state.speaking) {
+      rearmWhileSpeaking(220);
+      return;
+    }
+
     if (window.__voiceCallActive) {
+      turn.phase = 'listening';
       setStatus('Listening…', String(message || '') + ' Trying again…');
       setOrb(null);
       setTimeout(() => {
         if (!window.__voiceCallActive || window.__voiceCallMuted || state.speaking) return;
-        native.setVoiceLanguage?.(document.getElementById('callVoiceLang')?.value || 'en-US');
+        native.setVoiceLanguage?.(callLanguage());
         native.startVoiceInput?.();
-      }, 260);
+      }, 100);
     } else {
       const error = document.getElementById('chatError');
       if (error) error.textContent = message;
     }
   };
+
+  // Deterministic interruption: tapping the live-call mic while AI speaks stops the output
+  // immediately and starts/keeps recognition. It does not toggle mute until the AI is not speaking.
+  const muteButton = document.getElementById('voiceMute');
+  if (muteButton) {
+    muteButton.onclick = event => {
+      if (state.speaking || state.bargeArmed || turn.phase === 'speaking') {
+        beginBargeListening('');
+        native.setVoiceLanguage?.(callLanguage());
+        native.startVoiceInput?.();
+        return;
+      }
+
+      window.__voiceCallMuted = !window.__voiceCallMuted;
+      event.currentTarget.classList.toggle('muted', window.__voiceCallMuted);
+      event.currentTarget.textContent = window.__voiceCallMuted ? '🔇' : '🎙';
+      if (window.__voiceCallMuted) {
+        turn.phase = 'idle';
+        native.stopVoiceInput?.();
+        setStatus('Muted', 'Tap the microphone button to continue.');
+        setOrb(null);
+      } else {
+        turn.phase = 'listening';
+        native.setVoiceLanguage?.(callLanguage());
+        setTimeout(() => native.startVoiceInput?.(), 45);
+      }
+    };
+  }
+
+  window.startVoiceCall = async () => {
+    turn.phase = 'listening';
+    turn.lastBargeText = '';
+    turn.armGeneration += 1;
+    resetCandidate();
+    return baseStartVoiceCall?.();
+  };
+
+  window.endVoiceCall = () => {
+    turn.phase = 'idle';
+    turn.lastBargeText = '';
+    turn.armGeneration += 1;
+    resetCandidate();
+    state.userBarging = false;
+    state.bargeArmed = false;
+    return baseEndVoiceCall?.();
+  };
+  const endButton = document.getElementById('voiceEnd');
+  if (endButton) endButton.onclick = window.endVoiceCall;
 
   return 'ready';
 })();

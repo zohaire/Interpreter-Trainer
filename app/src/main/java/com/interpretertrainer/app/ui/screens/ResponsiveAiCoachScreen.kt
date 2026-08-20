@@ -44,17 +44,23 @@ fun ResponsiveAiCoachScreen(
             .bufferedReader(Charsets.UTF_8)
             .use { it.readText() }
     }
+    val standardArabicPatch = remember(context) {
+        context.assets.open("interpreter_standard_arabic.js")
+            .bufferedReader(Charsets.UTF_8)
+            .use { it.readText() }
+    }
 
     // Keep the normal Android Activity context for WebView, microphone permission and Puter auth.
     AiCoachScreen(onBack = onBack, sessionViewModel = sessionViewModel)
 
-    LaunchedEffect(rootView, darkTheme, voicePatch) {
+    LaunchedEffect(rootView, darkTheme, voicePatch, standardArabicPatch) {
         repeat(36) {
             val webView = findCoachWebView(rootView)
             if (webView != null) {
                 runCatching {
                     webView.setBackgroundColor(if (darkTheme) 0xFF0E0F12.toInt() else 0xFFFBFBFD.toInt())
                     webView.evaluateJavascript(themeSyncScript(darkTheme), null)
+                    webView.evaluateJavascript(standardArabicPatch, null)
                 }
                 if (evaluateForResult(webView, voicePatch)) return@LaunchedEffect
             }

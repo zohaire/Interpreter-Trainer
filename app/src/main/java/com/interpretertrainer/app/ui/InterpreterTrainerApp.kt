@@ -65,10 +65,13 @@ fun InterpreterTrainerApp(
             )
         }
         composable(Routes.AI_COACH) {
-            ResponsiveAiCoachScreen(
+            // Use the coach-owned WebView directly. The previous responsive wrapper reloaded the
+            // page and patched it after composition, which could leave a perfectly rendered but
+            // non-interactive surface on some Android/WebView combinations. AiCoachScreen owns
+            // the real AndroidView/WebView and its native microphone/TTS bridge from creation.
+            AiCoachScreen(
                 onBack = navController::popBackStack,
-                sessionViewModel = sessionViewModel,
-                themeMode = themeMode
+                sessionViewModel = sessionViewModel
             )
         }
         composable(Routes.HISTORY) { HistoryScreen(onBack = navController::popBackStack, sessionViewModel) { id -> navController.navigate("history/$id") } }

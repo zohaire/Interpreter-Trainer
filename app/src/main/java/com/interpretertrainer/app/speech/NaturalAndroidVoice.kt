@@ -6,9 +6,11 @@ import com.interpretertrainer.app.model.LanguageOption
 import java.util.Locale
 
 /**
- * Chooses the best available installed Android voice for Interpreter Trainer's supported languages.
- * Network voices are allowed when they offer materially higher quality; Android TTS remains a
- * fallback behind the online Interpreter Live voices.
+ * Chooses an installed Android voice for Interpreter Trainer's supported languages.
+ *
+ * Normal practice modes still prioritize voice quality. Interpreter AI's live-call path requests
+ * 0.98f and is deliberately treated as latency-sensitive: local voices and lower reported latency
+ * are preferred, and speech is made slightly faster so turn-taking feels conversational.
  */
 object NaturalAndroidVoice {
     fun localeFor(language: LanguageOption): Locale = when (language) {
@@ -37,19 +39,31 @@ object NaturalAndroidVoice {
             return false
         }
 
-        val candidates = tts.voices.orEmpty()
+        val liveConversation = speechRate in 0.95f..0.99f
+        val matchingVoices = tts.voices.orEmpty()
             .filter { voice -> voice.locale.language.equals(locale.language, ignoreCase = true) }
-            .sortedWith(
+
+        val candidates = if (liveConversation) {
+            matchingVoices.sortedWith(
+                compareBy<Voice> { it.isNetworkConnectionRequired }
+                    .thenBy { it.latency }
+                    .thenByDescending { it.quality }
+                    .thenByDescending { it.locale.country.equals(locale.country, ignoreCase = true) }
+            )
+        } else {
+            matchingVoices.sortedWith(
                 compareByDescending<Voice> { it.quality }
                     .thenBy { it.latency }
                     .thenByDescending { it.locale.country.equals(locale.country, ignoreCase = true) }
             )
+        }
 
         candidates.firstOrNull()?.let { best ->
             runCatching { tts.voice = best }
         }
 
-        tts.setSpeechRate(speechRate.coerceIn(0.72f, 1.18f))
+        val requestedRate = if (liveConversation) 1.08f else speechRate
+        tts.setSpeechRate(requestedRate.coerceIn(0.72f, 1.18f))
         tts.setPitch(
             when (locale.language.lowercase(Locale.ROOT)) {
                 "ar" -> 0.96f

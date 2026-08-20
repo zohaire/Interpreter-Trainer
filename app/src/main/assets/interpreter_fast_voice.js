@@ -1,7 +1,7 @@
 (() => {
-  if (window.__fastInterpreterVoiceV3) return 'ready';
+  if (window.__fastInterpreterVoiceV4) return 'ready';
   if (!window.__interpreterEnhancementsV3 || !window.InterpreterNative) return 'pending';
-  window.__fastInterpreterVoiceV3 = true;
+  window.__fastInterpreterVoiceV4 = true;
 
   const native = window.InterpreterNative;
   const state = {
@@ -358,7 +358,10 @@
     resizeComposer();
     updateSendState();
 
-    if (!(await ensureConnected())) {
+    // IMPORTANT: keep the first Puter cloud call in the original click/voice callback stack.
+    // Awaiting even a synchronous readiness helper first can consume the transient user activation
+    // that Android WebView needs when Puter opens its first-use authentication window.
+    if (ensureConnected() === false) {
       if (window.__voiceCallActive) setCallStatus('Connection failed', 'Unable to reach Interpreter AI.');
       return;
     }
@@ -384,12 +387,13 @@
     try {
       const system = 'You are Interpreter AI, a fast professional coach for interpreters. Work especially well across Arabic, English and French. Help with simultaneous and consecutive interpreting, shadowing, transcription, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. In voice conversations, answer naturally and directly in the user\'s language. Unless the user explicitly asks for detail, keep a voice reply to 1–3 short sentences so the conversation stays fast. Never invent scores, transcripts, history or app facts. The authoritative app/context information below is reliable.\n\n' + nativePracticeContext();
       const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
-      const stream = await puter.ai.chat(conversation, {
+      const streamPromise = puter.ai.chat(conversation, {
         model:'qwen/qwen3.6-27b',
         stream:true,
         max_tokens:voiceResponse ? 260 : 650,
         temperature:0.22
       });
+      const stream = await streamPromise;
 
       if (responseId !== state.responseId) throw { __interrupted:true };
       hideTyping();
@@ -430,7 +434,7 @@
       history = history.slice(-16);
       saveHistory();
       addMessage('assistant', answer);
-      setStatus('Online · ready', 'ok');
+      setStatus('Online AI · ready · AIV4', 'ok');
 
       window.__voiceAutoSpeak = false;
       window.__voiceOneShot = false;
@@ -445,7 +449,7 @@
       state.streamComplete = true;
       const message = error?.msg || error?.message || String(error);
       if (errorNode) errorNode.textContent = 'Interpreter AI could not answer: ' + message;
-      setStatus('Request failed', 'bad');
+      setStatus('Request failed · AIV4', 'bad');
       if (window.__voiceCallActive) {
         setCallStatus('Something went wrong', message);
         scheduleNormalListening(220);

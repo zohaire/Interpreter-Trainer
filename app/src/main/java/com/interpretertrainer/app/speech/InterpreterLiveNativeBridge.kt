@@ -25,42 +25,25 @@ import kotlin.math.sqrt
 /**
  * Native low-latency audio bridge used only by Interpreter Live.
  *
- * Two separate native paths are intentional:
- * 1. Android TTS gives immediate speech start instead of waiting on a remote TTS request per chunk.
- * 2. A lightweight VOICE_COMMUNICATION AudioRecord runs while TTS is speaking. Hardware/software
- *    echo cancellation and an adaptive energy gate detect a real user barge-in. As soon as speech
- *    is detected, JavaScript stops TTS and hands the microphone to SpeechRecognizer to capture the
- *    complete user utterance.
- *
- * This avoids trying to run Android SpeechRecognizer continuously under loudspeaker playback, which
- * is unreliable on real phones and was the reason interruptions could be ignored in Interpreter Live.
+ * Android TTS starts quickly and a separate VOICE_COMMUNICATION AudioRecord with acoustic echo
+ * cancellation detects near-end speech while the AI is talking. Once speech starts, the page stops
+ * output and hands the microphone to SpeechRecognizer to capture the complete user interruption.
  */
 internal class InterpreterLiveNativeBridge(
     private val context: Context
 ) : TextToSpeech.OnInitListener {
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    @Volatile
-    private var webView: WebView? = null
-
-    @Volatile
-    private var tts: TextToSpeech? = null
-
-    @Volatile
-    private var ttsReady = false
+    @Volatile private var webView: WebView? = null
+    @Volatile private var tts: TextToSpeech? = null
+    @Volatile private var ttsReady = false
 
     private val bargeRunning = AtomicBoolean(false)
-
-    @Volatile
-    private var bargeRecord: AudioRecord? = null
-
-    @Volatile
-    private var bargeThread: Thread? = null
+    @Volatile private var bargeRecord: AudioRecord? = null
+    @Volatile private var bargeThread: Thread? = null
 
     init {
-        mainHandler.post {
-            tts = TextToSpeech(context, this)
-        }
+        mainHandler.post { tts = TextToSpeech(context, this) }
     }
 
     fun attachWebView(view: WebView) {
@@ -99,29 +82,27 @@ internal class InterpreterLiveNativeBridge(
                 null,
                 "interpreter-live-${System.nanoTime()}"
             )
-            if (result == TextToSpeech.ERROR) {
-                evaluateJs("window.__nativeSpeechFinished?.();")
-            }
+            if (result == TextToSpeech.ERROR) evaluateJs("window.__nativeSpeechFinished?.();")
         }
         return true
     }
 
     @JavascriptInterface
     fun stopSpeaking() {
-        mainHandler.post {
-            runCatching { tts?.stop() }
-        }
+        mainHandler.post { runCatching { tts?.stop() } }
     }
 
     /**
-     * Starts a tiny VAD/AEC capture while AI speech is playing. This does not transcribe anything;
-     * it only tells the page that the user has started speaking so it can stop output immediately.
+     * Starts a VAD/AEC capture while AI speech is playing. It never transcribes the user; it only
+     * signals speech onset. Devices without usable acoustic echo cancellation fall back immediately
+     * to the existing recognizer-based monitor instead of silently losing interruption support.
      */
     @JavascriptInterface
     fun startBargeInDetection(): Boolean {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             return false
         }
+        if (!AcousticEchoCanceler.isAvailable()) return false
         if (bargeRunning.getAndSet(true)) return true
 
         val thread = Thread({ runBargeDetector() }, "InterpreterLiveBargeIn")
@@ -145,7 +126,7 @@ internal class InterpreterLiveNativeBridge(
             AudioFormat.ENCODING_PCM_16BIT
         )
         if (minBuffer <= 0) {
-            bargeRunning.set(false)
+            notifyBargeUnavailableIfStillExpected()
             return
         }
 
@@ -162,14 +143,21 @@ internal class InterpreterLiveNativeBridge(
                 max(minBuffer * 2, frameSamples * 8)
             )
             if (record.state != AudioRecord.STATE_INITIALIZED) {
+                notifyBargeUnavailableIfStillExpected()
                 return
             }
             bargeRecord = record
 
-            if (AcousticEchoCanceler.isAvailable()) {
-                echoCanceler = runCatching { AcousticEchoCanceler.create(record.audioSessionId) }.getOrNull()
-                runCatching { echoCanceler?.enabled = true }
+            echoCanceler = runCatching { AcousticEchoCanceler.create(record.audioSessionId) }.getOrNull()
+            val echoReady = runCatching {
+                echoCanceler?.enabled = true
+                echoCanceler?.enabled == true
+            }.getOrDefault(false)
+            if (!echoReady) {
+                notifyBargeUnavailableIfStillExpected()
+                return
             }
+
             if (NoiseSuppressor.isAvailable()) {
                 noiseSuppressor = runCatching { NoiseSuppressor.create(record.audioSessionId) }.getOrNull()
                 runCatching { noiseSuppressor?.enabled = true }
@@ -177,6 +165,7 @@ internal class InterpreterLiveNativeBridge(
 
             record.startRecording()
             if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                notifyBargeUnavailableIfStillExpected()
                 return
             }
 
@@ -203,8 +192,7 @@ internal class InterpreterLiveNativeBridge(
                 val db = if (rms <= 1.0) -90f else (20.0 * log10(rms / 32768.0)).toFloat()
                 val peakNorm = peak / 32768f
 
-                // First ~120 ms learns the residual loudspeaker/AEC floor. A genuine user voice is
-                // then detected as a sustained rise above that moving floor.
+                // First ~120 ms learns the residual speaker/AEC floor.
                 if (frameIndex < 6) {
                     baselineDb = if (frameIndex == 0) db else baselineDb * 0.68f + db * 0.32f
                     previousDb = db
@@ -229,14 +217,14 @@ internal class InterpreterLiveNativeBridge(
                 previousDb = db
                 frameIndex += 1
 
-                // 3 positive 20-ms frames gives a quick but non-single-spike trigger.
+                // Three positive 20-ms frames: fast reaction without a single-spike false trigger.
                 if (voiceHits >= 3 && bargeRunning.compareAndSet(true, false)) {
                     evaluateJs("window.__nativeBargeInDetected?.();")
                     break
                 }
             }
         } catch (_: Throwable) {
-            // JavaScript falls back to SpeechRecognizer monitoring when this detector cannot run.
+            notifyBargeUnavailableIfStillExpected()
         } finally {
             bargeRunning.set(false)
             runCatching {
@@ -250,6 +238,12 @@ internal class InterpreterLiveNativeBridge(
         }
     }
 
+    private fun notifyBargeUnavailableIfStillExpected() {
+        if (bargeRunning.compareAndSet(true, false)) {
+            evaluateJs("window.__nativeBargeMonitorUnavailable?.();")
+        }
+    }
+
     private fun stopBargeDetector() {
         bargeRunning.set(false)
         val record = bargeRecord
@@ -259,9 +253,7 @@ internal class InterpreterLiveNativeBridge(
     }
 
     private fun evaluateJs(script: String) {
-        mainHandler.post {
-            runCatching { webView?.evaluateJavascript(script, null) }
-        }
+        mainHandler.post { runCatching { webView?.evaluateJavascript(script, null) } }
     }
 
     override fun onInit(status: Int) {

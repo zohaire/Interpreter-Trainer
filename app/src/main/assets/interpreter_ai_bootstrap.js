@@ -1,10 +1,9 @@
 (() => {
-  if (window.__interpreterAiBootstrapV1) return 'ready';
-  window.__interpreterAiBootstrapV1 = true;
+  if (window.__interpreterAiBootstrapV2) return 'ready';
+  window.__interpreterAiBootstrapV2 = true;
 
   const byId = id => document.getElementById(id);
   let connectionPromise = null;
-  let automaticAttempted = false;
 
   const setConnectionStatus = (text, state = 'idle') => {
     const statusText = byId('statusText');
@@ -20,16 +19,27 @@
     if (node) node.textContent = message || '';
   };
 
-  const sdkReady = () => Boolean(window.puter?.auth?.isSignedIn && window.puter?.auth?.signIn && window.puter?.ai?.chat);
+  const sdkReady = () => Boolean(
+    window.puter?.auth?.isSignedIn &&
+    window.puter?.auth?.signIn &&
+    window.puter?.ai?.chat
+  );
+
   const isSignedIn = () => {
     try { return sdkReady() && window.puter.auth.isSignedIn() === true; }
     catch (_) { return false; }
   };
 
-  const connect = async ({ silent = false } = {}) => {
+  const connect = async () => {
+    if (navigator.onLine === false) {
+      setConnectionStatus('No internet connection', 'bad');
+      setError('Interpreter AI needs an internet connection.');
+      return false;
+    }
+
     if (!sdkReady()) {
       setConnectionStatus('AI service unavailable', 'bad');
-      if (!silent) setError('Interpreter AI could not load its online service. Check your internet connection and try again.');
+      setError('Interpreter AI could not load its online service. Check your connection and try again.');
       return false;
     }
 
@@ -41,10 +51,13 @@
 
     if (connectionPromise) return connectionPromise;
 
+    // Puter requires signIn() to be initiated by a real user action because it opens a popup.
+    // This function is intentionally called only from Send/Evaluate/suggestion actions. Do not
+    // move it to a timer, page-load callback, coroutine retry, or background connection attempt.
     connectionPromise = (async () => {
       try {
         setConnectionStatus('Connecting…');
-        if (!silent) setError('');
+        setError('');
         await window.puter.auth.signIn({ attempt_temp_user_creation: true });
         if (!isSignedIn()) throw new Error('Authentication did not complete.');
         setConnectionStatus('Online · ready', 'ok');
@@ -52,9 +65,9 @@
         return true;
       } catch (error) {
         const message = error?.msg || error?.message || String(error || 'Connection failed');
-        const retryable = /popup|window|closed|blocked|gesture|cancel/i.test(message);
-        setConnectionStatus(retryable ? 'Tap send to connect' : 'Connection needed', retryable ? 'idle' : 'bad');
-        if (!silent && !retryable) setError('Could not connect Interpreter AI: ' + message);
+        const cancelled = /cancel|closed|auth_window_closed/i.test(message);
+        setConnectionStatus(cancelled ? 'AI ready · send to start' : 'Connection needed', cancelled ? 'idle' : 'bad');
+        if (!cancelled) setError('Could not connect Interpreter AI: ' + message);
         return false;
       } finally {
         connectionPromise = null;
@@ -64,51 +77,36 @@
     return connectionPromise;
   };
 
-  // Replace the base page helpers so every chat/evaluation path shares one connection attempt.
-  window.connectAi = () => connect({ silent: false });
-  window.ensureConnected = () => connect({ silent: false });
+  // Replace the bundled page helpers. sendChat() and evaluatePerformance() call ensureConnected()
+  // directly from their click handlers, preserving the browser user activation Puter needs.
+  window.connectAi = connect;
+  window.ensureConnected = connect;
   window.__connectInterpreterAi = connect;
 
-  // Puter authentication is most reliable when initiated by a real user gesture. Start it on
-  // pointer-down, before the existing click handler reaches sendChat(), and make sendChat await
-  // the same promise instead of opening a second auth window.
-  const armUserGestureConnection = () => {
-    const candidates = [byId('sendBtn'), byId('evaluateBtn'), ...document.querySelectorAll('.suggestion')].filter(Boolean);
-    candidates.forEach(node => {
-      if (node.dataset.aiConnectArmed === '1') return;
-      node.dataset.aiConnectArmed = '1';
-      node.addEventListener('pointerdown', () => {
-        if (!isSignedIn()) void connect({ silent: true });
-      }, { capture: true, passive: true });
-    });
-  };
-
   const refresh = () => {
-    armUserGestureConnection();
+    if (navigator.onLine === false) {
+      setConnectionStatus('No internet connection', 'bad');
+      return;
+    }
     if (!sdkReady()) {
-      setConnectionStatus(navigator.onLine === false ? 'No internet connection' : 'Loading AI service…', navigator.onLine === false ? 'bad' : 'idle');
+      setConnectionStatus('Loading AI service…');
       return;
     }
     if (isSignedIn()) setConnectionStatus('Online · ready', 'ok');
-    else setConnectionStatus('Connecting…');
+    else setConnectionStatus('AI ready · send to start');
   };
 
-  const observer = new MutationObserver(armUserGestureConnection);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-  refresh();
-
-  // Try temporary-user creation immediately. Android WebView is configured to permit JS child
-  // windows; if the provider still requires a user activation, the pointer-down fallback above
-  // retries under the user's first Send/Evaluate gesture without losing their message.
-  if (!automaticAttempted && sdkReady() && !isSignedIn()) {
-    automaticAttempted = true;
-    setTimeout(() => void connect({ silent: true }), 180);
-  }
-
-  window.addEventListener('online', () => {
+  // The SDK is loaded by a blocking script tag before the coach's own script, but WebView can be
+  // unusually slow after process startup. Poll status only; never authenticate from this timer.
+  let refreshAttempts = 0;
+  const refreshTimer = setInterval(() => {
     refresh();
-    if (!isSignedIn()) void connect({ silent: true });
-  });
+    refreshAttempts += 1;
+    if (sdkReady() || refreshAttempts >= 40) clearInterval(refreshTimer);
+  }, 250);
+
+  refresh();
+  window.addEventListener('online', refresh);
   window.addEventListener('offline', () => setConnectionStatus('No internet connection', 'bad'));
 
   return 'ready';

@@ -159,7 +159,6 @@
     turn.lastBargeText = heard;
     resetCandidate();
 
-    // Stop only output. The full utterance is captured after this handoff and submitted once final.
     try { native.stopSpeaking?.(); } catch (_) {}
     try { window.stopNaturalInterpreterVoice?.(); } catch (_) {}
 
@@ -207,8 +206,6 @@
       turn.phase = 'speaking';
       state.bargeArmed = true;
 
-      // Preferred path: native VAD with VOICE_COMMUNICATION + AEC. It detects the user's onset
-      // without asking SpeechRecognizer to transcribe under loudspeaker playback.
       let nativeVadStarted = false;
       try { nativeVadStarted = native.startBargeInDetection?.() === true; } catch (_) {}
       if (nativeVadStarted) {
@@ -216,7 +213,6 @@
         return;
       }
 
-      // Fallback for devices where AudioRecord/AEC cannot start.
       turn.monitorMode = 'recognizer';
       native.setVoiceLanguage?.(callLanguage());
       native.startVoiceInput?.();
@@ -238,7 +234,6 @@
     armInterruptionMonitoring(15);
   };
 
-  // Called directly by the native VAD as soon as real near-end speech is detected.
   window.__nativeBargeInDetected = () => {
     if (!window.__voiceCallActive || window.__voiceCallMuted || !state.speaking || state.userBarging) return;
     beginBargeListening('');
@@ -288,8 +283,9 @@
       return;
     }
 
-    // Only the fallback recognizer-monitor path receives partials while AI is speaking.
-    if (window.__voiceCallActive && turn.monitorMode === 'recognizer' && state.bargeArmed && state.speaking) {
+    // Backward-compatible fallback: if a recognizer callback arrives while no native VAD is
+    // active, treat it as the conservative recognizer-monitor path.
+    if (window.__voiceCallActive && turn.monitorMode !== 'vad' && state.bargeArmed && state.speaking) {
       if (observeFallbackInterruption(value, false)) beginBargeListening(value);
       return;
     }
@@ -314,7 +310,7 @@
       return;
     }
 
-    if (window.__voiceCallActive && turn.monitorMode === 'recognizer' && state.bargeArmed && state.speaking) {
+    if (window.__voiceCallActive && turn.monitorMode !== 'vad' && state.bargeArmed && state.speaking) {
       if (observeFallbackInterruption(value, true)) {
         beginBargeListening(value);
         submitCompletedTurn(value);

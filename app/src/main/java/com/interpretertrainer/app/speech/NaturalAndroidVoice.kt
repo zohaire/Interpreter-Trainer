@@ -8,19 +8,20 @@ import java.util.Locale
 /**
  * Chooses an installed Android voice for Interpreter Trainer's supported languages.
  *
- * Normal practice modes still prioritize voice quality. Interpreter AI's live-call path requests
- * 0.98f and is deliberately treated as latency-sensitive: local voices and lower reported latency
- * are preferred, and speech is made slightly faster so turn-taking feels conversational.
+ * Arabic is intentionally normalized to a Modern Standard Arabic-oriented locale rather than
+ * Moroccan Darija. Normal practice modes still prioritize voice quality. Interpreter AI's live-call
+ * path is latency-sensitive: local voices and lower reported latency are preferred, and speech is
+ * made slightly faster so turn-taking feels conversational.
  */
 object NaturalAndroidVoice {
     fun localeFor(language: LanguageOption): Locale = when (language) {
-        LanguageOption.ARABIC_MOROCCO -> Locale("ar", "MA")
+        LanguageOption.ARABIC_MOROCCO -> Locale("ar", "SA")
         LanguageOption.FRENCH_FRANCE -> Locale.FRANCE
         LanguageOption.ENGLISH_US -> Locale.US
     }
 
     fun localeForTag(tag: String): Locale = when (tag.lowercase(Locale.ROOT)) {
-        "ar", "ar-ma", "arabic" -> Locale("ar", "MA")
+        "ar", "ar-ma", "ar-sa", "arabic", "msa", "standard arabic" -> Locale("ar", "SA")
         "fr", "fr-fr", "french" -> Locale.FRANCE
         else -> Locale.US
     }
@@ -66,7 +67,7 @@ object NaturalAndroidVoice {
         tts.setSpeechRate(requestedRate.coerceIn(0.72f, 1.18f))
         tts.setPitch(
             when (locale.language.lowercase(Locale.ROOT)) {
-                "ar" -> 0.96f
+                "ar" -> 0.98f
                 "fr" -> 1.01f
                 else -> 0.99f
             }

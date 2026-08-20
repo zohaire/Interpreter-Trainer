@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
@@ -25,18 +26,21 @@ import kotlin.math.sqrt
 /**
  * Native low-latency audio bridge used only by Interpreter Live.
  *
- * Android TTS starts quickly and a separate VOICE_COMMUNICATION AudioRecord with acoustic echo
- * cancellation detects near-end speech while the AI is talking. Once speech starts, the page stops
- * output and hands the microphone to SpeechRecognizer to capture the complete user interruption.
+ * Live speech is routed as VOICE_COMMUNICATION rather than ordinary media/assistant audio so the
+ * platform acoustic echo canceller receives the correct playback reference. A separate
+ * VOICE_COMMUNICATION AudioRecord detects near-end speech while the AI is talking; once speech
+ * starts, JavaScript stops output and hands the mic to SpeechRecognizer for the complete utterance.
  */
 internal class InterpreterLiveNativeBridge(
     private val context: Context
 ) : TextToSpeech.OnInitListener {
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     @Volatile private var webView: WebView? = null
     @Volatile private var tts: TextToSpeech? = null
     @Volatile private var ttsReady = false
+    @Volatile private var previousAudioMode: Int? = null
 
     private val bargeRunning = AtomicBoolean(false)
     @Volatile private var bargeRecord: AudioRecord? = null
@@ -64,14 +68,16 @@ internal class InterpreterLiveNativeBridge(
                 return@post
             }
 
+            enterCommunicationMode()
             engine.setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
 
             if (!NaturalAndroidVoice.configure(engine, languageTag, 0.98f)) {
+                exitCommunicationMode()
                 evaluateJs("window.__nativeSpeechFinished?.();")
                 return@post
             }
@@ -82,14 +88,21 @@ internal class InterpreterLiveNativeBridge(
                 null,
                 "interpreter-live-${System.nanoTime()}"
             )
-            if (result == TextToSpeech.ERROR) evaluateJs("window.__nativeSpeechFinished?.();")
+            if (result == TextToSpeech.ERROR) {
+                exitCommunicationMode()
+                evaluateJs("window.__nativeSpeechFinished?.();")
+            }
         }
         return true
     }
 
     @JavascriptInterface
     fun stopSpeaking() {
-        mainHandler.post { runCatching { tts?.stop() } }
+        mainHandler.post {
+            runCatching { tts?.stop() }
+            stopBargeDetector()
+            exitCommunicationMode()
+        }
     }
 
     /**
@@ -192,32 +205,33 @@ internal class InterpreterLiveNativeBridge(
                 val db = if (rms <= 1.0) -90f else (20.0 * log10(rms / 32768.0)).toFloat()
                 val peakNorm = peak / 32768f
 
-                // First ~120 ms learns the residual speaker/AEC floor.
-                if (frameIndex < 6) {
+                // First ~100 ms learns the residual loudspeaker/AEC floor.
+                if (frameIndex < 5) {
                     baselineDb = if (frameIndex == 0) db else baselineDb * 0.68f + db * 0.32f
                     previousDb = db
                     frameIndex += 1
                     continue
                 }
 
-                val threshold = max(-47f, baselineDb + 7.5f)
-                val suddenOnset = db - previousDb >= 5.5f
-                val speechLike = (db >= threshold && peakNorm >= 0.026f) ||
-                    (suddenOnset && db >= -43f && peakNorm >= 0.032f)
+                // Deliberately sensitive once AEC has removed the far-end speech. Three sustained
+                // 20-ms frames are enough to barge in quickly but one transient is ignored.
+                val threshold = max(-52f, baselineDb + 5.0f)
+                val suddenOnset = db - previousDb >= 4.0f
+                val speechLike = (db >= threshold && peakNorm >= 0.018f) ||
+                    (suddenOnset && db >= -48f && peakNorm >= 0.022f)
 
                 if (speechLike) {
                     voiceHits += 1
                 } else {
                     voiceHits = (voiceHits - 1).coerceAtLeast(0)
-                    if (db < baselineDb + 3.5f) {
-                        baselineDb = baselineDb * 0.965f + db * 0.035f
+                    if (db < baselineDb + 2.5f) {
+                        baselineDb = baselineDb * 0.97f + db * 0.03f
                     }
                 }
 
                 previousDb = db
                 frameIndex += 1
 
-                // Three positive 20-ms frames: fast reaction without a single-spike false trigger.
                 if (voiceHits >= 3 && bargeRunning.compareAndSet(true, false)) {
                     evaluateJs("window.__nativeBargeInDetected?.();")
                     break
@@ -252,6 +266,19 @@ internal class InterpreterLiveNativeBridge(
         }
     }
 
+    private fun enterCommunicationMode() {
+        if (previousAudioMode == null) {
+            previousAudioMode = audioManager.mode
+        }
+        runCatching { audioManager.mode = AudioManager.MODE_IN_COMMUNICATION }
+    }
+
+    private fun exitCommunicationMode() {
+        val restore = previousAudioMode ?: AudioManager.MODE_NORMAL
+        previousAudioMode = null
+        runCatching { audioManager.mode = restore }
+    }
+
     private fun evaluateJs(script: String) {
         mainHandler.post { runCatching { webView?.evaluateJavascript(script, null) } }
     }
@@ -268,21 +295,25 @@ internal class InterpreterLiveNativeBridge(
 
                 override fun onDone(utteranceId: String?) {
                     stopBargeDetector()
+                    exitCommunicationMode()
                     evaluateJs("window.__nativeSpeechFinished?.();")
                 }
 
                 override fun onStop(utteranceId: String?, interrupted: Boolean) {
                     stopBargeDetector()
+                    exitCommunicationMode()
                 }
 
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
                     stopBargeDetector()
+                    exitCommunicationMode()
                     evaluateJs("window.__nativeSpeechFinished?.();")
                 }
 
                 override fun onError(utteranceId: String?, errorCode: Int) {
                     stopBargeDetector()
+                    exitCommunicationMode()
                     evaluateJs("window.__nativeSpeechFinished?.();")
                 }
             })
@@ -296,6 +327,7 @@ internal class InterpreterLiveNativeBridge(
             runCatching { tts?.shutdown() }
             tts = null
             ttsReady = false
+            exitCommunicationMode()
             webView = null
         }
     }

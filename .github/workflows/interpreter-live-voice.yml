@@ -7,6 +7,8 @@ on:
       - 'app/src/main/assets/interpreter_fast_voice.js'
       - 'app/src/main/assets/interpreter_precise_barge_in.js'
       - 'app/src/main/assets/interpreter_live_latency.js'
+      - 'app/src/main/assets/interpreter_live_native_duplex.js'
+      - 'app/src/main/java/com/interpretertrainer/app/speech/InterpreterLiveNativeBridge.kt'
       - 'app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt'
       - 'app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt'
       - '.github/tests/interpreter-live-conversation.cjs'
@@ -16,6 +18,8 @@ on:
       - 'app/src/main/assets/interpreter_fast_voice.js'
       - 'app/src/main/assets/interpreter_precise_barge_in.js'
       - 'app/src/main/assets/interpreter_live_latency.js'
+      - 'app/src/main/assets/interpreter_live_native_duplex.js'
+      - 'app/src/main/java/com/interpretertrainer/app/speech/InterpreterLiveNativeBridge.kt'
       - 'app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt'
       - 'app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt'
       - '.github/tests/interpreter-live-conversation.cjs'
@@ -41,8 +45,18 @@ jobs:
           node --check app/src/main/assets/interpreter_fast_voice.js
           node --check app/src/main/assets/interpreter_precise_barge_in.js
           node --check app/src/main/assets/interpreter_live_latency.js
+          node --check app/src/main/assets/interpreter_live_native_duplex.js
           node --check app/src/main/assets/interpreter_standard_arabic.js
           node --check .github/tests/interpreter-live-conversation.cjs
+
+      - name: Guard native duplex architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'VOICE_COMMUNICATION' app/src/main/java/com/interpretertrainer/app/speech/InterpreterLiveNativeBridge.kt
+          grep -q 'AcousticEchoCanceler' app/src/main/java/com/interpretertrainer/app/speech/InterpreterLiveNativeBridge.kt
+          grep -q 'startBargeInDetection' app/src/main/java/com/interpretertrainer/app/speech/InterpreterLiveNativeBridge.kt
+          grep -q 'InterpreterLiveNative' app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt
 
       - name: Test ChatGPT-like interruption handoff and latency
         shell: bash

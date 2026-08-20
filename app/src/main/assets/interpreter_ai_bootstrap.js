@@ -32,8 +32,8 @@
       return false;
     }
 
-    // Puter cloud methods authenticate automatically when they are actually invoked. Calling
-    // auth.signIn() ourselves inside Android WebView created a second popup/auth state machine and
+    // Puter cloud methods authenticate automatically when they are actually invoked. Starting a
+    // separate manual login inside Android WebView created a second popup/auth state machine and
     // was the source of repeated auth_window_closed / "send to start" failures. The real AI call
     // now owns authentication exactly as Puter documents for essential cloud methods.
     setConnectionStatus('Online AI · ready', 'ok');

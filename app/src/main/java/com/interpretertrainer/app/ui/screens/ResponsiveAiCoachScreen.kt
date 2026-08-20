@@ -1,12 +1,10 @@
 package com.interpretertrainer.app.ui.screens
 
-import android.content.res.Configuration
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
@@ -20,6 +18,11 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 /**
  * Keeps Interpreter AI visually synchronized with the app theme and installs the low-latency,
  * interruptible live-voice layer after the existing coach page has initialized.
+ *
+ * Important: the coach itself must keep the real Activity context. Supplying a synthetic
+ * configuration Context to the WebView/permission/dialog stack can make some Android builds crash
+ * as soon as the AI screen is opened. Theme synchronization is therefore done inside the page with
+ * CSS variables instead of replacing LocalContext.
  */
 @Composable
 fun ResponsiveAiCoachScreen(
@@ -27,7 +30,7 @@ fun ResponsiveAiCoachScreen(
     sessionViewModel: SessionViewModel,
     themeMode: ThemeMode
 ) {
-    val baseContext = LocalContext.current
+    val context = LocalContext.current
     val rootView = LocalView.current
     val systemDark = isSystemInDarkTheme()
     val darkTheme = when (themeMode) {
@@ -36,29 +39,23 @@ fun ResponsiveAiCoachScreen(
         ThemeMode.DARK -> true
     }
 
-    val webContext = remember(baseContext, darkTheme) {
-        val configuration = Configuration(baseContext.resources.configuration).apply {
-            uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
-                if (darkTheme) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
-        }
-        baseContext.createConfigurationContext(configuration)
-    }
-
-    val voicePatch = remember(baseContext) {
-        baseContext.assets.open("interpreter_fast_voice.js")
+    val voicePatch = remember(context) {
+        context.assets.open("interpreter_fast_voice.js")
             .bufferedReader(Charsets.UTF_8)
             .use { it.readText() }
     }
 
-    CompositionLocalProvider(LocalContext provides webContext) {
-        AiCoachScreen(onBack = onBack, sessionViewModel = sessionViewModel)
-    }
+    // Keep the normal Android Activity context for WebView, microphone permission and Puter auth.
+    AiCoachScreen(onBack = onBack, sessionViewModel = sessionViewModel)
 
     LaunchedEffect(rootView, darkTheme, voicePatch) {
         repeat(36) {
             val webView = findCoachWebView(rootView)
             if (webView != null) {
-                webView.evaluateJavascript(themeSyncScript(darkTheme), null)
+                runCatching {
+                    webView.setBackgroundColor(if (darkTheme) 0xFF0E0F12.toInt() else 0xFFFBFBFD.toInt())
+                    webView.evaluateJavascript(themeSyncScript(darkTheme), null)
+                }
                 if (evaluateForResult(webView, voicePatch)) return@LaunchedEffect
             }
             delay(160)
@@ -76,10 +73,40 @@ private fun findCoachWebView(view: View): WebView? {
     return null
 }
 
-private fun themeSyncScript(darkTheme: Boolean): String {
-    val theme = if (darkTheme) "dark" else "light"
-    return "document.documentElement.setAttribute('data-app-theme','$theme');" +
-        "document.documentElement.style.colorScheme='$theme';'ready';"
+private fun themeSyncScript(darkTheme: Boolean): String = if (darkTheme) {
+    """
+    (() => {
+      const root = document.documentElement;
+      root.setAttribute('data-app-theme','dark');
+      root.style.colorScheme = 'dark';
+      const values = {
+        '--bg':'#0e0f12','--surface':'#141519','--soft':'#1d1f24','--surface-soft':'#1d1f24',
+        '--surface-strong':'#292c33','--text':'#f4f4f6','--muted':'#b7bac2','--faint':'#848995',
+        '--accent':'#aeb0ff','--accent2':'#b896ff','--accent-soft':'#252541','--accent-ink':'#d0d1ff',
+        '--border':'#2d3037','--danger':'#ffb4ac','--ok':'#76dfa8','--user':'#24262c',
+        '--shadow':'0 18px 55px rgba(0,0,0,.32)'
+      };
+      Object.entries(values).forEach(([key,value]) => root.style.setProperty(key,value));
+      return 'ready';
+    })();
+    """.trimIndent()
+} else {
+    """
+    (() => {
+      const root = document.documentElement;
+      root.setAttribute('data-app-theme','light');
+      root.style.colorScheme = 'light';
+      const values = {
+        '--bg':'#fbfbfd','--surface':'#ffffff','--soft':'#f2f3f7','--surface-soft':'#f2f3f7',
+        '--surface-strong':'#e8eaf0','--text':'#17181c','--muted':'#727680','--faint':'#9b9fa8',
+        '--accent':'#4b4ee8','--accent2':'#7b5cff','--accent-soft':'#eeeeff','--accent-ink':'#3539c8',
+        '--border':'#e6e7ec','--danger':'#c9362b','--ok':'#138a55','--user':'#eff0f4',
+        '--shadow':'0 18px 55px rgba(25,27,40,.10)'
+      };
+      Object.entries(values).forEach(([key,value]) => root.style.setProperty(key,value));
+      return 'ready';
+    })();
+    """.trimIndent()
 }
 
 private suspend fun evaluateForResult(webView: WebView, script: String): Boolean =

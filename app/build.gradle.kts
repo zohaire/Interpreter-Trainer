@@ -17,8 +17,8 @@ android {
         applicationId = "com.interpretertrainer.app"
         minSdk = 31
         targetSdk = 36
-        versionCode = providers.environmentVariable("INTERPRETER_VERSION_CODE").orNull?.toIntOrNull() ?: 9
-        versionName = "0.5.4"
+        versionCode = providers.environmentVariable("INTERPRETER_VERSION_CODE").orNull?.toIntOrNull() ?: 10
+        versionName = "0.5.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

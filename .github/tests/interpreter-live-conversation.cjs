@@ -171,14 +171,52 @@ async function testLowLatencyPolicyAndInterruptedContext() {
     { innerText: newAddition, textContent: newAddition }
   ];
 
+  let rafId = 0;
+  const rafTimers = new Map();
+  const requestAnimationFrame = callback => {
+    const id = ++rafId;
+    const timer = setTimeout(() => {
+      rafTimers.delete(id);
+      callback(Date.now());
+    }, 0);
+    rafTimers.set(id, timer);
+    return id;
+  };
+  const cancelAnimationFrame = id => {
+    const timer = rafTimers.get(id);
+    if (timer) clearTimeout(timer);
+    rafTimers.delete(id);
+  };
+
+  const domNodes = {
+    callVoiceLang: element({ value: 'en-US' }),
+    voiceLang: element({ value: 'en-US' }),
+    voiceCallStatus: element(),
+    voiceCallLive: element(),
+    voiceEnd: element(),
+    statusText: element(),
+    chatInput: { ...element(), style: {}, scrollHeight: 38 },
+    chatScroll: { scrollHeight: 100, scrollTop: 0, scrollTo() {} }
+  };
+
   const context = {
-    console,
+    console, setTimeout, clearTimeout, requestAnimationFrame, cancelAnimationFrame,
     document: {
-      querySelectorAll(selector) { return selector === '.message.user .bubble' ? visibleBubbles : []; }
+      querySelectorAll(selector) { return selector === '.message.user .bubble' ? visibleBubbles : []; },
+      getElementById(id) { return domNodes[id] || null; }
     },
     window: {
+      __fastInterpreterVoiceV5: true,
+      __fastInterpreterVoiceV4: true,
       __fastInterpreterVoiceV3: true,
       __voiceCallActive: true,
+      __voiceCallMuted: false,
+      busy: false,
+      InterpreterLiveNative: {
+        startCloudVoiceInput() { return false; },
+        stopCloudVoiceInput() {}
+      },
+      endVoiceCall() {},
       puter: {
         ai: {
           async chat(request, options) {
@@ -189,10 +227,14 @@ async function testLowLatencyPolicyAndInterruptedContext() {
         }
       }
     },
-    Number, Math, Array, String
+    Number, Math, Array, String, Date, Promise
   };
   context.window.window = context.window;
   context.window.document = context.document;
+  context.window.setTimeout = setTimeout;
+  context.window.clearTimeout = clearTimeout;
+  context.window.requestAnimationFrame = requestAnimationFrame;
+  context.window.cancelAnimationFrame = cancelAnimationFrame;
   vm.createContext(context);
 
   const source = fs.readFileSync('app/src/main/assets/interpreter_live_latency.js', 'utf8');

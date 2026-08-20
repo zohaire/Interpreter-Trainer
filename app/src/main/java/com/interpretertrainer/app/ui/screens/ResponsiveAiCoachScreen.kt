@@ -71,7 +71,9 @@ fun ResponsiveAiCoachScreen(
         liveLatencyPatch,
         standardArabicPatch
     ) {
-        repeat(36) {
+        // Slow mobile WebView/Puter startup can exceed a few seconds. Keep retrying for about ten
+        // seconds, while still returning immediately as soon as every voice layer reports ready.
+        repeat(80) {
             val webView = findCoachWebView(rootView)
             if (webView != null) {
                 runCatching {

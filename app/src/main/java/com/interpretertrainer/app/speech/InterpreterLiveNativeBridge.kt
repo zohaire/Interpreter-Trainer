@@ -64,18 +64,13 @@ internal class InterpreterLiveNativeBridge(
         if (clean.isBlank() || !ttsReady) return false
 
         mainHandler.post {
-            // Pre-empt any recognizer/recorder that still owns the mic from the user's previous turn.
-            // Its coordinator callback cancels the stale capture before the VAD starts.
-            MicrophoneSessionCoordinator.acquire(liveAudioOwnerId) {
-                mainHandler.post {
-                    stopBargeDetector()
-                    runCatching { tts?.stop() }
-                    exitCommunicationMode()
-                }
-            }
+            // Briefly take the coordinator lease only to pre-empt any stale recognizer/recorder from
+            // the user's previous turn. Release it before playback so a fallback recognizer can run
+            // alongside speaker output when native AEC/VAD is unavailable on the device.
+            MicrophoneSessionCoordinator.acquire(liveAudioOwnerId) { }
+            MicrophoneSessionCoordinator.release(liveAudioOwnerId)
 
             val engine = tts ?: run {
-                releaseLiveAudioLease()
                 evaluateJs("window.__nativeSpeechFinished?.();")
                 return@post
             }
@@ -90,7 +85,6 @@ internal class InterpreterLiveNativeBridge(
 
             if (!NaturalAndroidVoice.configure(engine, languageTag, 0.98f)) {
                 exitCommunicationMode()
-                releaseLiveAudioLease()
                 evaluateJs("window.__nativeSpeechFinished?.();")
                 return@post
             }
@@ -103,7 +97,6 @@ internal class InterpreterLiveNativeBridge(
             )
             if (result == TextToSpeech.ERROR) {
                 exitCommunicationMode()
-                releaseLiveAudioLease()
                 evaluateJs("window.__nativeSpeechFinished?.();")
             }
         }
@@ -116,7 +109,6 @@ internal class InterpreterLiveNativeBridge(
             runCatching { tts?.stop() }
             stopBargeDetector()
             exitCommunicationMode()
-            releaseLiveAudioLease()
         }
     }
 
@@ -284,10 +276,6 @@ internal class InterpreterLiveNativeBridge(
         runCatching { audioManager.mode = restore }
     }
 
-    private fun releaseLiveAudioLease() {
-        MicrophoneSessionCoordinator.release(liveAudioOwnerId)
-    }
-
     private fun evaluateJs(script: String) {
         mainHandler.post { runCatching { webView?.evaluateJavascript(script, null) } }
     }
@@ -305,28 +293,24 @@ internal class InterpreterLiveNativeBridge(
                 override fun onDone(utteranceId: String?) {
                     stopBargeDetector()
                     exitCommunicationMode()
-                    releaseLiveAudioLease()
                     evaluateJs("window.__nativeSpeechFinished?.();")
                 }
 
                 override fun onStop(utteranceId: String?, interrupted: Boolean) {
                     stopBargeDetector()
                     exitCommunicationMode()
-                    releaseLiveAudioLease()
                 }
 
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
                     stopBargeDetector()
                     exitCommunicationMode()
-                    releaseLiveAudioLease()
                     evaluateJs("window.__nativeSpeechFinished?.();")
                 }
 
                 override fun onError(utteranceId: String?, errorCode: Int) {
                     stopBargeDetector()
                     exitCommunicationMode()
-                    releaseLiveAudioLease()
                     evaluateJs("window.__nativeSpeechFinished?.();")
                 }
             })
@@ -341,7 +325,7 @@ internal class InterpreterLiveNativeBridge(
             tts = null
             ttsReady = false
             exitCommunicationMode()
-            releaseLiveAudioLease()
+            MicrophoneSessionCoordinator.release(liveAudioOwnerId)
             webView = null
         }
     }

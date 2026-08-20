@@ -1,6 +1,6 @@
 (() => {
   if (window.__interpreterLiveLatencyV2) return 'ready';
-  if (!window.__fastInterpreterVoiceV3 || !window.puter?.ai?.chat) return 'pending';
+  if (!(window.__fastInterpreterVoiceV4 || window.__fastInterpreterVoiceV3) || !window.puter?.ai?.chat) return 'pending';
 
   const originalChat = window.puter.ai.chat.bind(window.puter.ai);
   const LIVE_MARKER = 'INTERPRETER LIVE LOW-LATENCY POLICY';

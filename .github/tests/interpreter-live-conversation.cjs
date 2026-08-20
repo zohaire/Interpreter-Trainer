@@ -165,12 +165,24 @@ async function testConversationalBargeIn() {
   assert.ok(stopVoiceCalls >= 0);
 }
 
-async function testLowLatencyPolicy() {
+async function testLowLatencyPolicyAndInterruptedContext() {
   let capturedOptions = null;
   let capturedRequest = null;
 
+  const oldQuestion = 'What is the difference between consecutive and simultaneous interpreting?';
+  const newAddition = 'Actually compare their note-taking requirements instead.';
+  const visibleBubbles = [
+    { innerText: oldQuestion, textContent: oldQuestion },
+    { innerText: newAddition, textContent: newAddition }
+  ];
+
   const context = {
     console,
+    document: {
+      querySelectorAll(selector) {
+        return selector === '.message.user .bubble' ? visibleBubbles : [];
+      }
+    },
     window: {
       __fastInterpreterVoiceV3: true,
       __voiceCallActive: true,
@@ -190,15 +202,18 @@ async function testLowLatencyPolicy() {
     String
   };
   context.window.window = context.window;
+  context.window.document = context.document;
   vm.createContext(context);
 
   const source = fs.readFileSync('app/src/main/assets/interpreter_live_latency.js', 'utf8');
   const result = vm.runInContext(source, context);
   assert.strictEqual(result, 'ready', 'Low-latency policy did not initialize.');
 
+  // Simulate the exact history hole produced when an older AI answer was interrupted: the request
+  // contains only the new addition, while the previous question still exists in the visible chat.
   const messages = [
     { role: 'system', content: 'You are Interpreter AI.' },
-    { role: 'user', content: 'Explain this quickly.' }
+    { role: 'user', content: newAddition }
   ];
   await context.window.puter.ai.chat(messages, { stream: true, max_tokens: 260, temperature: 0.22 });
 
@@ -210,12 +225,19 @@ async function testLowLatencyPolicy() {
     capturedRequest[0].content.includes('INTERPRETER LIVE LOW-LATENCY POLICY'),
     'Direct short-answer policy was not added to voice requests.'
   );
+
+  const userTurns = capturedRequest.filter(item => item.role === 'user').map(item => item.content);
+  assert.deepStrictEqual(
+    userTurns,
+    [oldQuestion, newAddition],
+    'The previous question was not preserved before the completed interruption/addition.'
+  );
 }
 
 (async () => {
   await testConversationalBargeIn();
-  await testLowLatencyPolicy();
-  console.log('Interpreter Live conversational interruption and latency tests passed.');
+  await testLowLatencyPolicyAndInterruptedContext();
+  console.log('Interpreter Live conversational interruption, context and latency tests passed.');
 })().catch(error => {
   console.error(error);
   process.exit(1);

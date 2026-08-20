@@ -2,7 +2,7 @@
   if (window.__interpreterConversationalBargeInV4) return 'ready';
   const native = window.InterpreterNative;
   const state = window.__fastInterpreterVoiceState;
-  if (!native || !state || !window.__fastInterpreterVoiceV3) return 'pending';
+  if (!native || !state || !(window.__fastInterpreterVoiceV4 || window.__fastInterpreterVoiceV3)) return 'pending';
   window.__interpreterConversationalBargeInV4 = true;
 
   const baseSpeechFinished = window.__nativeSpeechFinished;

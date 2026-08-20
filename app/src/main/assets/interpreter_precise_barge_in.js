@@ -10,14 +10,14 @@
   const baseEndVoiceCall = window.endVoiceCall;
 
   const turn = {
-    phase: 'idle', // idle | listening | thinking | speaking | barge-listening
+    phase: 'idle',
     candidate: '',
     candidateHits: 0,
     candidateStartedAt: 0,
     candidateLastAt: 0,
     lastBargeText: '',
     armGeneration: 0,
-    monitorMode: 'none' // none | vad | recognizer
+    monitorMode: 'none'
   };
   window.__interpreterLiveTurnState = turn;
 
@@ -26,7 +26,6 @@
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-
   const words = value => clean(value).split(' ').filter(Boolean);
 
   const tokenOverlap = (a, b) => {
@@ -38,7 +37,6 @@
   };
 
   const spokenReference = () => clean((state.speechReference || '') + ' ' + (state.streamAnswer || ''));
-
   const likelySpeakerEcho = value => {
     const heard = clean(value);
     const spoken = spokenReference();
@@ -72,7 +70,6 @@
       resetCandidate();
       return false;
     }
-
     const now = Date.now();
     const count = words(text).length;
     if (count < 2 && !['stop','wait','attends','توقف','انتظر','لحظة'].includes(text)) return false;
@@ -97,14 +94,12 @@
     orb.classList.remove('listening', 'speaking');
     if (mode) orb.classList.add(mode);
   };
-
   const setStatus = (status, text) => {
     const statusNode = document.getElementById('voiceCallStatus');
     const liveNode = document.getElementById('voiceCallLive');
     if (statusNode) statusNode.textContent = status;
     if (liveNode && text !== undefined) liveNode.textContent = text;
   };
-
   const callLanguage = () => document.getElementById('callVoiceLang')?.value || 'en-US';
 
   const writeInput = value => {
@@ -161,7 +156,6 @@
 
     try { native.stopSpeaking?.(); } catch (_) {}
     try { window.stopNaturalInterpreterVoice?.(); } catch (_) {}
-
     setStatus('Listening…', turn.lastBargeText || 'Go ahead — I am listening.');
     setOrb('listening');
   };
@@ -177,14 +171,12 @@
   const submitCompletedTurn = value => {
     const text = String(value || turn.lastBargeText || '').trim();
     if (!text || !writeInput(text)) return;
-
     turn.phase = 'thinking';
     turn.monitorMode = 'none';
     turn.lastBargeText = '';
     state.userBarging = false;
     state.bargeArmed = false;
     resetCandidate();
-
     window.__voiceAutoSpeak = true;
     window.__voiceOneShot = !window.__voiceCallActive;
     if (window.__voiceCallActive) {
@@ -194,15 +186,21 @@
     window.sendChat?.(true);
   };
 
+  const startRecognizerFallback = () => {
+    if (!window.__voiceCallActive || window.__voiceCallMuted || !state.speaking || state.userBarging) return;
+    turn.monitorMode = 'recognizer';
+    state.bargeArmed = true;
+    native.setVoiceLanguage?.(callLanguage());
+    native.startVoiceInput?.();
+  };
+
   const armInterruptionMonitoring = (delay = 15) => {
     const generation = ++turn.armGeneration;
     resetCandidate();
     state.bargeArmed = false;
-
     setTimeout(() => {
       if (generation !== turn.armGeneration) return;
       if (!window.__voiceCallActive || window.__voiceCallMuted || !state.speaking || state.userBarging) return;
-
       turn.phase = 'speaking';
       state.bargeArmed = true;
 
@@ -212,10 +210,7 @@
         turn.monitorMode = 'vad';
         return;
       }
-
-      turn.monitorMode = 'recognizer';
-      native.setVoiceLanguage?.(callLanguage());
-      native.startVoiceInput?.();
+      startRecognizerFallback();
     }, delay);
   };
 
@@ -240,6 +235,12 @@
     startRecognizerForInterruptedTurn();
   };
 
+  window.__nativeBargeMonitorUnavailable = () => {
+    if (!window.__voiceCallActive || !state.speaking || state.userBarging) return;
+    if (turn.monitorMode !== 'vad') return;
+    startRecognizerFallback();
+  };
+
   window.__nativeSpeechFinished = () => {
     try { native.stopBargeInDetection?.(); } catch (_) {}
     turn.monitorMode = 'none';
@@ -254,7 +255,6 @@
     if (mic) mic.title = 'Listening…';
     const error = document.getElementById('chatError');
     if (error) error.textContent = '';
-
     if (!window.__voiceCallActive) return;
     if (turn.phase === 'barge-listening') {
       setStatus('Listening…', turn.lastBargeText || 'Keep speaking');
@@ -275,28 +275,22 @@
   window.__voiceInputPartial = text => {
     const value = String(text || '').trim();
     if (!value) return;
-
     if (window.__voiceCallActive && turn.phase === 'barge-listening') {
       turn.lastBargeText = value;
       setStatus('Listening…', value);
       setOrb('listening');
       return;
     }
-
-    // Backward-compatible fallback: if a recognizer callback arrives while no native VAD is
-    // active, treat it as the conservative recognizer-monitor path.
     if (window.__voiceCallActive && turn.monitorMode !== 'vad' && state.bargeArmed && state.speaking) {
       if (observeFallbackInterruption(value, false)) beginBargeListening(value);
       return;
     }
-
     if (window.__voiceCallActive) {
       turn.phase = 'listening';
       setStatus('Listening…', value);
       setOrb('listening');
       return;
     }
-
     writeInput(value);
   };
 
@@ -304,12 +298,10 @@
     window.__voiceInputStopped?.();
     const value = String(text || '').trim();
     if (!value) return;
-
     if (window.__voiceCallActive && turn.phase === 'barge-listening') {
       submitCompletedTurn(value);
       return;
     }
-
     if (window.__voiceCallActive && turn.monitorMode !== 'vad' && state.bargeArmed && state.speaking) {
       if (observeFallbackInterruption(value, true)) {
         beginBargeListening(value);
@@ -319,19 +311,16 @@
       }
       return;
     }
-
     if (window.__voiceCallActive && state.speaking) {
       rearmWhileSpeaking(70);
       return;
     }
-
     submitCompletedTurn(value);
   };
 
   window.__voiceInputError = message => {
     window.__voiceInputStopped?.();
     resetCandidate();
-
     if (window.__voiceCallActive && turn.phase === 'barge-listening') {
       const fallback = String(turn.lastBargeText || '').trim();
       if (words(fallback).length >= 2) {
@@ -344,12 +333,10 @@
       }
       return;
     }
-
     if (window.__voiceCallActive && state.speaking) {
       rearmWhileSpeaking(90);
       return;
     }
-
     if (window.__voiceCallActive) {
       turn.phase = 'listening';
       setStatus('Listening…', String(message || '') + ' Trying again…');
@@ -373,7 +360,6 @@
         startRecognizerForInterruptedTurn();
         return;
       }
-
       window.__voiceCallMuted = !window.__voiceCallMuted;
       event.currentTarget.classList.toggle('muted', window.__voiceCallMuted);
       event.currentTarget.textContent = window.__voiceCallMuted ? '🔇' : '🎙';

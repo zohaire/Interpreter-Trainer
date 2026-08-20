@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
+import com.interpretertrainer.app.speech.InterpreterVoiceBridge
 import com.interpretertrainer.app.viewmodel.SessionViewModel
 import java.util.Locale
 
@@ -36,16 +37,15 @@ private const val COACH_URL =
     "https://appassets.androidplatform.net/assets/interpreter_coach.html"
 
 /**
- * Interpreter Coach uses an online Qwen model through Puter.js.
- *
- * There are no on-device model weights, model downloads, provider API keys, or private backend
- * endpoints in the APK. Puter handles browser authentication and AI access for each user.
+ * Interpreter Coach uses an online Qwen model through Puter.js and native Android voice I/O.
+ * The visual chat stays bundled in the APK; Android SpeechRecognizer/TextToSpeech handle voice.
  */
 @Composable
 fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
     val sessions by sessionViewModel.sessions.collectAsState()
     val bridge = remember { PracticeContextBridge() }
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
+    val voiceBridgeRef = remember { mutableStateOf<InterpreterVoiceBridge?>(null) }
 
     SideEffect {
         bridge.contextValue = buildPracticeContext(sessions)
@@ -53,8 +53,11 @@ fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
 
     DisposableEffect(Unit) {
         onDispose {
+            voiceBridgeRef.value?.destroy()
+            voiceBridgeRef.value = null
             webViewRef.value?.let { webView ->
                 runCatching { webView.stopLoading() }
+                runCatching { webView.removeJavascriptInterface("InterpreterVoice") }
                 runCatching { webView.removeJavascriptInterface("InterpreterNative") }
                 runCatching { webView.destroy() }
             }
@@ -68,7 +71,11 @@ fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
                 .fillMaxSize()
                 .padding(padding),
             factory = { context ->
-                createCoachWebView(context, bridge).also { webViewRef.value = it }
+                createCoachWebView(
+                    context = context,
+                    practiceBridge = bridge,
+                    onVoiceBridgeCreated = { voiceBridgeRef.value = it }
+                ).also { webViewRef.value = it }
             },
             update = { webView ->
                 CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
@@ -86,7 +93,11 @@ private class PracticeContextBridge {
 }
 
 @SuppressLint("SetJavaScriptEnabled")
-private fun createCoachWebView(context: Context, bridge: PracticeContextBridge): WebView {
+private fun createCoachWebView(
+    context: Context,
+    practiceBridge: PracticeContextBridge,
+    onVoiceBridgeCreated: (InterpreterVoiceBridge) -> Unit
+): WebView {
     val assetLoader = WebViewAssetLoader.Builder()
         .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
         .build()
@@ -97,7 +108,12 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
         ViewGroup.LayoutParams.MATCH_PARENT
     )
     configureCoachWebView(webView)
-    webView.addJavascriptInterface(bridge, "InterpreterNative")
+
+    val voiceBridge = InterpreterVoiceBridge(context) { webView }
+    onVoiceBridgeCreated(voiceBridge)
+    webView.addJavascriptInterface(practiceBridge, "InterpreterNative")
+    webView.addJavascriptInterface(voiceBridge, "InterpreterVoice")
+
     webView.webViewClient = object : WebViewClient() {
         override fun shouldInterceptRequest(
             view: WebView?,
@@ -110,24 +126,7 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
             if (url != COACH_URL) return
-
-            view?.evaluateJavascript(
-                """
-                (() => {
-                  const mode = document.getElementById('mode');
-                  if (mode) {
-                    mode.innerHTML = '<option>Simultaneous Interpretation</option><option>Consecutive Interpretation</option><option>Live Transcription</option>';
-                  }
-                  const suggestions = Array.from(document.querySelectorAll('.suggestion'));
-                  const oldShadowing = suggestions.find(button => button.textContent.includes('Shadowing'));
-                  if (oldShadowing) {
-                    oldShadowing.textContent = 'Simultaneous exercise';
-                    oldShadowing.onclick = () => window.useSuggestion?.('Give me a short simultaneous interpreting exercise in English, French, or Arabic.');
-                  }
-                })();
-                """.trimIndent(),
-                null
-            )
+            view?.evaluateJavascript(nativeCoachEnhancementsScript(), null)
         }
     }
     webView.webChromeClient = CoachChromeClient(context)
@@ -137,12 +136,239 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
         setAcceptThirdPartyCookies(webView, true)
     }
 
-    // Serve the bundled page through Android's reserved HTTPS app-assets origin. Unlike
-    // loadDataWithBaseURL() with a fake internet domain, this URL survives reloads triggered by
-    // authentication/session code and never leaves the APK for the coach document itself.
     webView.loadUrl(COACH_URL)
     return webView
 }
+
+private fun nativeCoachEnhancementsScript(): String = """
+(() => {
+  const mode = document.getElementById('mode');
+  if (mode) {
+    mode.innerHTML = '<option>Simultaneous Interpretation</option><option>Consecutive Interpretation</option><option>Live Transcription</option>';
+  }
+  const suggestions = Array.from(document.querySelectorAll('.suggestion'));
+  const oldShadowing = suggestions.find(button => button.textContent.includes('Shadowing'));
+  if (oldShadowing) {
+    oldShadowing.textContent = 'Simultaneous exercise';
+    oldShadowing.onclick = () => window.useSuggestion?.('Give me a short simultaneous interpreting exercise in English, French, or Arabic.');
+  }
+
+  if (window.__interpreterNativeVoiceInstalled) return;
+  window.__interpreterNativeVoiceInstalled = true;
+
+  const composer = document.querySelector('.composer');
+  const input = document.getElementById('chatInput');
+  const send = document.getElementById('sendBtn');
+  const messages = document.getElementById('messages');
+  if (!composer || !input || !send || !messages || !window.InterpreterVoice) return;
+
+  const style = document.createElement('style');
+  style.id = 'nativeVoiceStyle';
+  style.textContent = `
+    .voice-mic-btn {
+      width:38px;height:38px;flex:0 0 auto;border:0;border-radius:14px;
+      display:grid;place-items:center;background:transparent;color:var(--muted);
+      cursor:pointer;transition:background .16s ease,color .16s ease,transform .12s ease;
+    }
+    .voice-mic-btn:active { transform:scale(.94); }
+    .voice-mic-btn.active { background:var(--accent-soft);color:var(--accent-ink); }
+    .voice-mic-btn.speaking { background:var(--accent);color:#fff; }
+    .voice-mic-btn svg { width:19px;height:19px; }
+  `;
+  document.head.appendChild(style);
+
+  const mic = document.createElement('button');
+  mic.id = 'voiceMicBtn';
+  mic.type = 'button';
+  mic.className = 'voice-mic-btn';
+  mic.title = 'Start voice conversation';
+  mic.setAttribute('aria-label', 'Start voice conversation');
+  mic.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><path d="M12 17v5"></path><path d="M8 22h8"></path></svg>';
+  composer.insertBefore(mic, send);
+
+  const voiceState = {
+    active:false,
+    speaking:false,
+    listening:false,
+    lastLanguage:localStorage.getItem('interpreterVoiceLanguage') || navigator.language || 'auto'
+  };
+
+  function detectLanguage(text) {
+    const value = String(text || '');
+    if (/[\u0600-\u06FF]/.test(value)) return 'ar-MA';
+    const lower = ' ' + value.toLowerCase() + ' ';
+    const french = [' je ',' tu ',' vous ',' une ',' des ',' est ',' avec ',' pour ',' dans ',' mais ',' que ',' qui ',' le ',' la ',' les ',' de '];
+    if (french.some(word => lower.includes(word)) || /[àâçéèêëîïôùûüÿœ]/i.test(value)) return 'fr-FR';
+    return 'en-US';
+  }
+
+  function rememberLanguage(text) {
+    voiceState.lastLanguage = detectLanguage(text);
+    try { localStorage.setItem('interpreterVoiceLanguage', voiceState.lastLanguage); } catch (_) {}
+  }
+
+  function restoreAiStatus() {
+    try {
+      if (window.puter && puter.auth.isSignedIn()) setStatus('Online · ready', 'ok');
+      else setStatus('Ready to connect');
+    } catch (_) { setStatus('Ready'); }
+  }
+
+  function renderVoiceState() {
+    mic.classList.toggle('active', voiceState.active && !voiceState.speaking);
+    mic.classList.toggle('speaking', voiceState.speaking);
+    mic.title = voiceState.active ? 'Stop voice conversation' : 'Start voice conversation';
+    mic.setAttribute('aria-label', mic.title);
+  }
+
+  function startVoiceConversation() {
+    voiceState.active = true;
+    voiceState.speaking = false;
+    voiceState.listening = true;
+    renderVoiceState();
+    setStatus('Listening…', 'ok');
+    window.InterpreterVoice.startListening(voiceState.lastLanguage || 'auto', true);
+  }
+
+  function stopVoiceConversation() {
+    voiceState.active = false;
+    voiceState.speaking = false;
+    voiceState.listening = false;
+    window.InterpreterVoice.stopAll();
+    input.placeholder = 'Message Interpreter AI';
+    renderVoiceState();
+    restoreAiStatus();
+  }
+
+  function submitVoiceText(text) {
+    const clean = String(text || '').trim();
+    if (!clean || !voiceState.active) return;
+    rememberLanguage(clean);
+    input.value = clean;
+    if (typeof resizeComposer === 'function') resizeComposer();
+    if (typeof updateSendState === 'function') updateSendState();
+    setStatus('Thinking…', 'ok');
+    if (typeof sendChat === 'function') sendChat();
+  }
+
+  window.InterpreterVoiceNative = {
+    onState(state) {
+      if (!voiceState.active && state !== 'ready') return;
+      voiceState.listening = state === 'listening';
+      voiceState.speaking = state === 'speaking';
+      if (state === 'listening') {
+        input.placeholder = 'Listening…';
+        setStatus('Listening…', 'ok');
+      } else if (state === 'speaking') {
+        input.placeholder = 'You can interrupt me…';
+        setStatus('Speaking…', 'ok');
+      } else if (state === 'ready' && voiceState.active) {
+        setStatus('Voice ready', 'ok');
+      }
+      renderVoiceState();
+    },
+    onPartial(text) {
+      if (!voiceState.active || voiceState.speaking) return;
+      input.value = String(text || '');
+      if (typeof resizeComposer === 'function') resizeComposer();
+      if (typeof updateSendState === 'function') updateSendState();
+    },
+    onResult(text) {
+      submitVoiceText(text);
+    },
+    onBargeIn(text) {
+      if (!voiceState.active) return;
+      voiceState.speaking = false;
+      renderVoiceState();
+      setStatus('Listening to you…', 'ok');
+    },
+    onSpeechStart() {
+      if (!voiceState.active) return;
+      voiceState.speaking = true;
+      voiceState.listening = true;
+      renderVoiceState();
+      setStatus('Speaking…', 'ok');
+    },
+    onSpeechDone() {
+      if (!voiceState.active) return;
+      voiceState.speaking = false;
+      voiceState.listening = true;
+      renderVoiceState();
+      setStatus('Listening…', 'ok');
+    },
+    onError(message) {
+      const text = String(message || 'Voice error');
+      const errorHost = document.getElementById('chatError');
+      if (errorHost) errorHost.textContent = text;
+      setStatus('Voice needs attention', 'bad');
+      if (text.toLowerCase().includes('permission')) {
+        voiceState.active = false;
+        voiceState.speaking = false;
+        voiceState.listening = false;
+        renderVoiceState();
+      }
+    }
+  };
+
+  mic.onclick = () => {
+    if (voiceState.active && voiceState.speaking) {
+      window.InterpreterVoice.manualInterrupt(voiceState.lastLanguage || 'auto');
+      voiceState.speaking = false;
+      voiceState.listening = true;
+      renderVoiceState();
+      setStatus('Listening…', 'ok');
+      return;
+    }
+    if (voiceState.active) stopVoiceConversation();
+    else startVoiceConversation();
+  };
+
+  function enhanceAssistantMessage(row) {
+    if (!(row instanceof HTMLElement) || !row.classList.contains('assistant')) return;
+    if (row.dataset.nativeVoiceEnhanced === '1') return;
+    row.dataset.nativeVoiceEnhanced = '1';
+    const bubble = row.querySelector('.bubble');
+    if (!bubble) return;
+    const text = bubble.innerText.trim();
+    if (!text) return;
+
+    let actions = row.querySelector('.message-actions');
+    if (!actions) {
+      actions = document.createElement('div');
+      actions.className = 'message-actions';
+      row.querySelector('.message-body')?.appendChild(actions);
+    }
+    const listen = document.createElement('button');
+    listen.type = 'button';
+    listen.className = 'message-action';
+    listen.textContent = 'Listen';
+    listen.onclick = () => {
+      rememberLanguage(text);
+      window.InterpreterVoice.speak(text, voiceState.lastLanguage, false);
+    };
+    actions?.appendChild(listen);
+
+    if (voiceState.active) {
+      rememberLanguage(text);
+      window.InterpreterVoice.speak(text, voiceState.lastLanguage, true);
+    }
+  }
+
+  document.querySelectorAll('.message.assistant').forEach(enhanceAssistantMessage);
+  const observer = new MutationObserver(mutations => {
+    mutations.forEach(mutation => {
+      mutation.addedNodes.forEach(node => {
+        if (!(node instanceof HTMLElement)) return;
+        if (node.classList.contains('message') && node.classList.contains('assistant')) {
+          enhanceAssistantMessage(node);
+        }
+        node.querySelectorAll?.('.message.assistant').forEach(enhanceAssistantMessage);
+      });
+    });
+  });
+  observer.observe(messages, { childList:true, subtree:true });
+})();
+""".trimIndent()
 
 @SuppressLint("SetJavaScriptEnabled")
 private fun configureCoachWebView(webView: WebView) {
@@ -158,16 +384,6 @@ private fun configureCoachWebView(webView: WebView) {
     }
 }
 
-/**
- * Puter authentication opens a JavaScript popup. Android WebView delivers that popup through
- * onCreateWindow(), but a Dialog whose window stays WRAP_CONTENT can collapse a MATCH_PARENT
- * child WebView to effectively 0x0. The user then only sees the dimmed parent screen and closing
- * it makes Puter report auth_window_closed.
- *
- * Keep the popup as a true child WebView (so window.opener/postMessage and shared cookies keep
- * working), but place it in a full-screen container and force the Dialog window itself to
- * MATCH_PARENT after show().
- */
 private class CoachChromeClient(private val context: Context) : WebChromeClient() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreateWindow(

@@ -7,6 +7,7 @@ on:
     paths:
       - "app/src/main/assets/interpreter_coach.html"
       - "app/src/main/assets/interpreter_ai_bootstrap.js"
+      - "app/src/main/assets/interpreter_fast_voice.js"
       - "app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt"
       - "app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt"
       - ".github/workflows/interpreter-ai-e2e.yml"
@@ -23,11 +24,17 @@ jobs:
         run: |
           set -euo pipefail
           node --check app/src/main/assets/interpreter_ai_bootstrap.js
+          node --check app/src/main/assets/interpreter_fast_voice.js
           grep -q 'interpreter_ai_bootstrap.js' app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt
           grep -q 'qwen/qwen3.6-27b' app/src/main/assets/interpreter_coach.html
-          grep -q 'Online AI · ready' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'Online AI · ready · AIV4' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q '__fastInterpreterVoiceV4' app/src/main/assets/interpreter_fast_voice.js
           if grep -q 'auth.signIn' app/src/main/assets/interpreter_ai_bootstrap.js; then
-            echo 'The injected Android AI bootstrap must not manually sign in.'
+            echo 'The Android AI bootstrap must not manually sign in.'
+            exit 1
+          fi
+          if grep -q 'await ensureConnected' app/src/main/assets/interpreter_fast_voice.js; then
+            echo 'Interpreter AI must not await a readiness helper before the first Puter call.'
             exit 1
           fi
 
@@ -58,7 +65,7 @@ jobs:
           npm install --silent playwright@1.55.0
           npx playwright install --with-deps chromium
 
-      - name: Test Android coach direct Qwen request path
+      - name: Test Android coach first Qwen request keeps user activation
         shell: bash
         run: |
           set -euo pipefail
@@ -87,15 +94,23 @@ jobs:
                       isSignedIn() { return window.__mockSigned === true; },
                       async signIn() {
                         window.__signInCalls += 1;
-                        throw new Error('Manual signIn must not be used by the Android bootstrap');
+                        throw new Error('Manual signIn must not be used by the Android AI path');
                       }
                     },
                     ai: {
-                      async chat(messages, options) {
-                        window.__chatCalls.push({ messages, options, userActivation:Boolean(navigator.userActivation?.isActive) });
-                        // Simulate Puter's documented automatic authentication on the first cloud call.
+                      chat(messages, options) {
+                        window.__chatCalls.push({
+                          messages,
+                          options,
+                          userActivation: Boolean(navigator.userActivation?.isActive)
+                        });
                         window.__mockSigned = true;
-                        return { message: { content: 'INTERPRETER_AI_OK' } };
+                        if (options?.stream) {
+                          return (async function* () {
+                            yield { text: 'INTERPRETER_AI_OK' };
+                          })();
+                        }
+                        return Promise.resolve({ message: { content: 'INTERPRETER_AI_OK' } });
                       },
                       async txt2speech() { throw new Error('not used in this test'); }
                     }
@@ -114,16 +129,39 @@ jobs:
               'app/src/main/assets/interpreter_ai_bootstrap.js'
             );
             await page.addScriptTag({ path: bootstrap });
-            await page.waitForTimeout(350);
+
+            // Reproduce the native Android injection preconditions for the fast voice/chat layer.
+            await page.evaluate(() => {
+              window.__interpreterEnhancementsV3 = true;
+              window.InterpreterNative = {
+                setVoiceLanguage() {},
+                startVoiceInput() {},
+                stopVoiceInput() {},
+                speakText() { return false; },
+                stopSpeaking() {},
+                getPracticeContext() { return 'No saved practice context.'; }
+              };
+            });
+
+            const fastVoice = path.join(
+              process.env.GITHUB_WORKSPACE,
+              'app/src/main/assets/interpreter_fast_voice.js'
+            );
+            await page.addScriptTag({ path: fastVoice });
+            await page.waitForTimeout(250);
 
             const before = await page.evaluate(() => ({
               signInCalls: window.__signInCalls,
               chatCalls: window.__chatCalls.length,
-              status: document.getElementById('statusText')?.textContent || ''
+              status: document.getElementById('statusText')?.textContent || '',
+              bootstrapV4: Boolean(window.__interpreterAiBootstrapV4),
+              fastVoiceV4: Boolean(window.__fastInterpreterVoiceV4)
             }));
+            if (!before.bootstrapV4) throw new Error('AI bootstrap V4 did not load.');
+            if (!before.fastVoiceV4) throw new Error('Fast Interpreter AI V4 did not load.');
             if (before.signInCalls !== 0) throw new Error('Manual authentication ran before a request.');
             if (before.chatCalls !== 0) throw new Error('AI generated a request before the user sent anything.');
-            if (!/online ai.*ready/i.test(before.status)) throw new Error(`Unexpected initial AI status: ${before.status}`);
+            if (!/online ai.*ready.*aiv4/i.test(before.status)) throw new Error(`Unexpected initial AI status: ${before.status}`);
 
             await page.fill('#chatInput', 'Confirm the interpreter coach works.');
             await page.click('#sendBtn');
@@ -143,10 +181,13 @@ jobs:
 
             if (first.signInCalls !== 0) throw new Error(`Manual signIn was called ${first.signInCalls} times.`);
             if (first.chatCalls.length !== 1) throw new Error(`Expected one AI request, got ${first.chatCalls.length}.`);
+            if (!first.chatCalls[0].userActivation) {
+              throw new Error('The first puter.ai.chat call lost transient user activation before authentication could open.');
+            }
             if (first.chatCalls[0]?.options?.model !== 'qwen/qwen3.6-27b') {
               throw new Error(`Wrong AI model: ${first.chatCalls[0]?.options?.model}`);
             }
-            if (!/online/i.test(first.status)) throw new Error(`AI did not stay online: ${first.status}`);
+            if (!/online ai.*ready.*aiv4/i.test(first.status)) throw new Error(`AI did not stay online: ${first.status}`);
             if (first.error) throw new Error(`Unexpected visible AI error: ${first.error}`);
 
             await page.fill('#chatInput', 'Second message.');
@@ -162,7 +203,7 @@ jobs:
             if (!second.signed) throw new Error('Provider-managed session was not retained.');
 
             await browser.close();
-            console.log('Interpreter AI integration passed: provider loaded, no manual auth popup, direct Qwen3.6 27B request, visible response, reusable session.');
+            console.log('Interpreter AI integration passed: AIV4 loaded, first Qwen call kept user activation, no manual auth popup, visible streamed response, reusable session.');
           })().catch(error => {
             console.error(error);
             process.exit(1);

@@ -15,9 +15,12 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.core.content.ContextCompat
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.log10
 import kotlin.math.max
@@ -26,10 +29,10 @@ import kotlin.math.sqrt
 /**
  * Native low-latency audio bridge used only by Interpreter Live.
  *
- * Live speech is routed as VOICE_COMMUNICATION rather than ordinary media/assistant audio so the
- * platform acoustic echo canceller receives the correct playback reference. A separate
- * VOICE_COMMUNICATION AudioRecord detects near-end speech while the AI is talking; once speech
- * starts, JavaScript stops output and hands the mic to SpeechRecognizer for the complete utterance.
+ * The normal fast path uses Android TTS plus an echo-cancelled VOICE_COMMUNICATION detector for
+ * barge-in. The bridge also owns an independent PCM capture fallback used when Android's platform
+ * SpeechRecognizer is unavailable or unstable. That fallback records one utterance, stops on
+ * silence, and sends a WAV data URL back to JavaScript for online Puter speech-to-text.
  */
 internal class InterpreterLiveNativeBridge(
     private val context: Context
@@ -47,6 +50,10 @@ internal class InterpreterLiveNativeBridge(
     @Volatile private var bargeRecord: AudioRecord? = null
     @Volatile private var bargeThread: Thread? = null
 
+    private val cloudCaptureRunning = AtomicBoolean(false)
+    @Volatile private var cloudCaptureRecord: AudioRecord? = null
+    @Volatile private var cloudCaptureThread: Thread? = null
+
     init {
         mainHandler.post { tts = TextToSpeech(context, this) }
     }
@@ -61,17 +68,23 @@ internal class InterpreterLiveNativeBridge(
     @JavascriptInterface
     fun speakText(text: String, languageTag: String): Boolean {
         val clean = text.trim().take(4_000)
-        if (clean.isBlank() || !ttsReady) return false
+        if (clean.isBlank()) return false
+        val language = normalizeLanguageTag(languageTag)
+
+        if (!ttsReady) {
+            requestOnlineSpeech(clean, language)
+            return true
+        }
 
         mainHandler.post {
-            // Briefly take the coordinator lease only to pre-empt any stale recognizer/recorder from
-            // the user's previous turn. Release it before playback so a fallback recognizer can run
-            // alongside speaker output when native AEC/VAD is unavailable on the device.
+            // Briefly pre-empt any stale recognizer from the user's previous turn, then release the
+            // lease before playback so interruption monitoring can own the microphone independently.
             MicrophoneSessionCoordinator.acquire(liveAudioOwnerId) { }
             MicrophoneSessionCoordinator.release(liveAudioOwnerId)
 
-            val engine = tts ?: run {
-                evaluateJs("window.__nativeSpeechFinished?.();")
+            val engine = tts
+            if (engine == null) {
+                requestOnlineSpeech(clean, language)
                 return@post
             }
 
@@ -83,9 +96,9 @@ internal class InterpreterLiveNativeBridge(
                     .build()
             )
 
-            if (!NaturalAndroidVoice.configure(engine, languageTag, 0.98f)) {
+            if (!NaturalAndroidVoice.configure(engine, language, 0.98f)) {
                 exitCommunicationMode()
-                evaluateJs("window.__nativeSpeechFinished?.();")
+                requestOnlineSpeech(clean, language)
                 return@post
             }
 
@@ -97,7 +110,7 @@ internal class InterpreterLiveNativeBridge(
             )
             if (result == TextToSpeech.ERROR) {
                 exitCommunicationMode()
-                evaluateJs("window.__nativeSpeechFinished?.();")
+                requestOnlineSpeech(clean, language)
             }
         }
         return true
@@ -109,7 +122,33 @@ internal class InterpreterLiveNativeBridge(
             runCatching { tts?.stop() }
             stopBargeDetector()
             exitCommunicationMode()
+            evaluateJs("window.__stopOnlineVoice?.();")
         }
+    }
+
+    /**
+     * Device-independent fallback voice input. This is intentionally exposed separately from
+     * SpeechRecognizer. JavaScript invokes it only when the platform recognizer is missing/failing.
+     */
+    @JavascriptInterface
+    fun startCloudVoiceInput(languageTag: String): Boolean {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            evaluateJs("window.__cloudVoiceCaptureError?.('Microphone permission is required.');")
+            return false
+        }
+        if (cloudCaptureRunning.getAndSet(true)) return true
+
+        stopBargeDetector()
+        val language = normalizeLanguageTag(languageTag)
+        val thread = Thread({ runCloudVoiceCapture(language) }, "InterpreterCloudVoiceCapture")
+        cloudCaptureThread = thread
+        thread.start()
+        return true
+    }
+
+    @JavascriptInterface
+    fun stopCloudVoiceInput() {
+        stopCloudVoiceCapture()
     }
 
     @JavascriptInterface
@@ -129,6 +168,143 @@ internal class InterpreterLiveNativeBridge(
     @JavascriptInterface
     fun stopBargeInDetection() {
         stopBargeDetector()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun runCloudVoiceCapture(languageTag: String) {
+        val sampleRate = 16_000
+        val frameSamples = 320 // 20 ms
+        val minBuffer = AudioRecord.getMinBufferSize(
+            sampleRate,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
+
+        if (minBuffer <= 0) {
+            cloudCaptureRunning.set(false)
+            evaluateJs("window.__cloudVoiceCaptureError?.('Microphone audio is unavailable.');")
+            return
+        }
+
+        var record: AudioRecord? = null
+        val pcm = ByteArrayOutputStream(sampleRate * 2 * 8)
+        var capturedSpeech = false
+        var deliverAudio = false
+
+        try {
+            record = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                sampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                max(minBuffer * 2, frameSamples * 8)
+            )
+            if (record.state != AudioRecord.STATE_INITIALIZED) {
+                evaluateJs("window.__cloudVoiceCaptureError?.('Microphone could not initialize.');")
+                return
+            }
+            cloudCaptureRecord = record
+
+            if (NoiseSuppressor.isAvailable()) {
+                runCatching {
+                    NoiseSuppressor.create(record.audioSessionId)?.apply {
+                        enabled = true
+                        release()
+                    }
+                }
+            }
+
+            record.startRecording()
+            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                evaluateJs("window.__cloudVoiceCaptureError?.('Microphone could not start.');")
+                return
+            }
+
+            evaluateJs("window.__voiceInputStarted?.();")
+
+            val frame = ShortArray(frameSamples)
+            var frameIndex = 0
+            var baselineDb = -60f
+            var voiceHits = 0
+            var silentFrames = 0
+
+            while (cloudCaptureRunning.get() && frameIndex < 1_250) { // hard cap ~25 s
+                val read = record.read(frame, 0, frame.size, AudioRecord.READ_BLOCKING)
+                if (read <= 0) continue
+
+                var sumSquares = 0.0
+                var peak = 0
+                for (index in 0 until read) {
+                    val sample = frame[index].toInt()
+                    val abs = kotlin.math.abs(sample)
+                    if (abs > peak) peak = abs
+                    sumSquares += sample.toDouble() * sample.toDouble()
+                    pcm.write(sample and 0xff)
+                    pcm.write((sample shr 8) and 0xff)
+                }
+
+                val rms = sqrt(sumSquares / read.coerceAtLeast(1).toDouble())
+                val db = if (rms <= 1.0) -90f else (20.0 * log10(rms / 32768.0)).toFloat()
+                val peakNorm = peak / 32768f
+
+                if (frameIndex < 8) {
+                    baselineDb = if (frameIndex == 0) db else baselineDb * 0.72f + db * 0.28f
+                    frameIndex += 1
+                    continue
+                }
+
+                val threshold = max(-50f, baselineDb + 7.0f)
+                val speechLike = db >= threshold && peakNorm >= 0.014f
+
+                if (speechLike) {
+                    voiceHits += 1
+                    silentFrames = 0
+                    if (voiceHits >= 2) capturedSpeech = true
+                } else {
+                    voiceHits = 0
+                    if (capturedSpeech) silentFrames += 1
+                    else if (db < baselineDb + 2.0f) baselineDb = baselineDb * 0.98f + db * 0.02f
+                }
+
+                frameIndex += 1
+
+                // End ~560 ms after the speaker actually finishes. This keeps voice turns fast while
+                // still allowing a natural short pause in the middle of a sentence.
+                if (capturedSpeech && silentFrames >= 28) {
+                    deliverAudio = true
+                    break
+                }
+
+                // No-speech timeout ~6 s.
+                if (!capturedSpeech && frameIndex >= 300) break
+            }
+
+            if (capturedSpeech) deliverAudio = true
+        } catch (_: Throwable) {
+            evaluateJs("window.__cloudVoiceCaptureError?.('Voice recording failed.');")
+        } finally {
+            cloudCaptureRunning.set(false)
+            runCatching {
+                if (record?.recordingState == AudioRecord.RECORDSTATE_RECORDING) record.stop()
+            }
+            runCatching { record?.release() }
+            if (cloudCaptureRecord === record) cloudCaptureRecord = null
+            cloudCaptureThread = null
+            evaluateJs("window.__voiceInputStopped?.();")
+        }
+
+        if (!deliverAudio || !capturedSpeech || pcm.size() < 3_200) {
+            evaluateJs("window.__cloudVoiceCaptureError?.('No speech was detected.');")
+            return
+        }
+
+        val wav = pcmToWav(pcm.toByteArray(), sampleRate)
+        val encoded = Base64.encodeToString(wav, Base64.NO_WRAP)
+        val dataUrl = "data:audio/wav;base64,$encoded"
+        evaluateJs(
+            "window.__cloudVoiceAudioReady?.(" +
+                JSONObject.quote(dataUrl) + "," + JSONObject.quote(languageTag) + ");"
+        )
     }
 
     @SuppressLint("MissingPermission")
@@ -265,6 +441,63 @@ internal class InterpreterLiveNativeBridge(
         }
     }
 
+    private fun stopCloudVoiceCapture() {
+        cloudCaptureRunning.set(false)
+        val record = cloudCaptureRecord
+        runCatching {
+            if (record?.recordingState == AudioRecord.RECORDSTATE_RECORDING) record.stop()
+        }
+    }
+
+    private fun requestOnlineSpeech(text: String, languageTag: String) {
+        evaluateJs(
+            "window.__onlineVoiceSpeak?.(" + JSONObject.quote(text) + "," +
+                JSONObject.quote(languageTag) + ");"
+        )
+    }
+
+    private fun pcmToWav(pcm: ByteArray, sampleRate: Int): ByteArray {
+        val out = ByteArrayOutputStream(44 + pcm.size)
+        fun ascii(value: String) = out.write(value.toByteArray(Charsets.US_ASCII))
+        fun intLe(value: Int) {
+            out.write(value and 0xff)
+            out.write((value shr 8) and 0xff)
+            out.write((value shr 16) and 0xff)
+            out.write((value shr 24) and 0xff)
+        }
+        fun shortLe(value: Int) {
+            out.write(value and 0xff)
+            out.write((value shr 8) and 0xff)
+        }
+
+        val channels = 1
+        val bitsPerSample = 16
+        val byteRate = sampleRate * channels * bitsPerSample / 8
+        val blockAlign = channels * bitsPerSample / 8
+
+        ascii("RIFF")
+        intLe(36 + pcm.size)
+        ascii("WAVE")
+        ascii("fmt ")
+        intLe(16)
+        shortLe(1)
+        shortLe(channels)
+        intLe(sampleRate)
+        intLe(byteRate)
+        shortLe(blockAlign)
+        shortLe(bitsPerSample)
+        ascii("data")
+        intLe(pcm.size)
+        out.write(pcm)
+        return out.toByteArray()
+    }
+
+    private fun normalizeLanguageTag(tag: String): String = when (tag.lowercase()) {
+        "fr", "fr-fr", "french" -> "fr-FR"
+        "ar", "ar-ma", "arabic" -> "ar-MA"
+        else -> "en-US"
+    }
+
     private fun enterCommunicationMode() {
         if (previousAudioMode == null) previousAudioMode = audioManager.mode
         runCatching { audioManager.mode = AudioManager.MODE_IN_COMMUNICATION }
@@ -319,6 +552,7 @@ internal class InterpreterLiveNativeBridge(
 
     fun dispose() {
         stopBargeDetector()
+        stopCloudVoiceCapture()
         mainHandler.post {
             runCatching { tts?.stop() }
             runCatching { tts?.shutdown() }

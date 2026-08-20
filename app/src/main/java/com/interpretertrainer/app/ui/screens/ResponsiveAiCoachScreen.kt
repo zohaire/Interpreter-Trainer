@@ -44,6 +44,11 @@ fun ResponsiveAiCoachScreen(
             .bufferedReader(Charsets.UTF_8)
             .use { it.readText() }
     }
+    val preciseBargeInPatch = remember(context) {
+        context.assets.open("interpreter_precise_barge_in.js")
+            .bufferedReader(Charsets.UTF_8)
+            .use { it.readText() }
+    }
     val standardArabicPatch = remember(context) {
         context.assets.open("interpreter_standard_arabic.js")
             .bufferedReader(Charsets.UTF_8)
@@ -53,7 +58,7 @@ fun ResponsiveAiCoachScreen(
     // Keep the normal Android Activity context for WebView, microphone permission and Puter auth.
     AiCoachScreen(onBack = onBack, sessionViewModel = sessionViewModel)
 
-    LaunchedEffect(rootView, darkTheme, voicePatch, standardArabicPatch) {
+    LaunchedEffect(rootView, darkTheme, voicePatch, preciseBargeInPatch, standardArabicPatch) {
         repeat(36) {
             val webView = findCoachWebView(rootView)
             if (webView != null) {
@@ -62,7 +67,9 @@ fun ResponsiveAiCoachScreen(
                     webView.evaluateJavascript(themeSyncScript(darkTheme), null)
                     webView.evaluateJavascript(standardArabicPatch, null)
                 }
-                if (evaluateForResult(webView, voicePatch)) return@LaunchedEffect
+                if (evaluateForResult(webView, voicePatch)) {
+                    if (evaluateForResult(webView, preciseBargeInPatch)) return@LaunchedEffect
+                }
             }
             delay(160)
         }

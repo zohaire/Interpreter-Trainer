@@ -1,8 +1,10 @@
 (() => {
-  if (window.__interpreterConversationalBargeInV4) return 'ready';
+  if (window.__interpreterConversationalBargeInV5) return 'ready';
   const native = window.InterpreterNative;
+  const live = window.InterpreterLiveNative || null;
   const state = window.__fastInterpreterVoiceState;
-  if (!native || !state || !(window.__fastInterpreterVoiceV4 || window.__fastInterpreterVoiceV3)) return 'pending';
+  if (!native || !state || !(window.__fastInterpreterVoiceV5 || window.__fastInterpreterVoiceV4 || window.__fastInterpreterVoiceV3)) return 'pending';
+  window.__interpreterConversationalBargeInV5 = true;
   window.__interpreterConversationalBargeInV4 = true;
 
   const baseSpeechFinished = window.__nativeSpeechFinished;
@@ -122,9 +124,19 @@
     } catch (_) {}
   };
 
+  const stopLiveMonitor = () => {
+    try { live?.stopBargeInDetection?.(); } catch (_) {}
+  };
+
+  const stopLiveSpeech = () => {
+    try { live?.stopSpeaking?.(); } catch (_) {}
+    try { native.stopSpeaking?.(); } catch (_) {}
+    try { window.stopNaturalInterpreterVoice?.(); } catch (_) {}
+  };
+
   const stopMonitoring = () => {
     turn.armGeneration += 1;
-    try { native.stopBargeInDetection?.(); } catch (_) {}
+    stopLiveMonitor();
     if (turn.monitorMode === 'recognizer' && turn.phase !== 'barge-listening') {
       try { native.stopVoiceInput?.(); } catch (_) {}
     }
@@ -142,7 +154,7 @@
     }
 
     turn.armGeneration += 1;
-    try { native.stopBargeInDetection?.(); } catch (_) {}
+    stopLiveMonitor();
     cancelOldAiResponse();
     state.userBarging = true;
     state.bargeArmed = false;
@@ -154,8 +166,8 @@
     turn.lastBargeText = heard;
     resetCandidate();
 
-    try { native.stopSpeaking?.(); } catch (_) {}
-    try { window.stopNaturalInterpreterVoice?.(); } catch (_) {}
+    // Stop the current answer immediately, but do not submit a partial interruption.
+    stopLiveSpeech();
     setStatus('Listening…', turn.lastBargeText || 'Go ahead — I am listening.');
     setOrb('listening');
   };
@@ -165,7 +177,7 @@
     setTimeout(() => {
       if (!window.__voiceCallActive || turn.phase !== 'barge-listening') return;
       native.startVoiceInput?.();
-    }, 28);
+    }, 24);
   };
 
   const submitCompletedTurn = value => {
@@ -194,7 +206,7 @@
     native.startVoiceInput?.();
   };
 
-  const armInterruptionMonitoring = (delay = 15) => {
+  const armInterruptionMonitoring = (delay = 10) => {
     const generation = ++turn.armGeneration;
     resetCandidate();
     state.bargeArmed = false;
@@ -204,9 +216,10 @@
       turn.phase = 'speaking';
       state.bargeArmed = true;
 
-      let nativeVadStarted = false;
-      try { nativeVadStarted = native.startBargeInDetection?.() === true; } catch (_) {}
-      if (nativeVadStarted) {
+      // Direct call to the dedicated native bridge; no Proxy/InterpreterNative replacement.
+      let vadStarted = false;
+      try { vadStarted = live?.startBargeInDetection?.() === true; } catch (_) {}
+      if (vadStarted) {
         turn.monitorMode = 'vad';
         return;
       }
@@ -214,7 +227,7 @@
     }, delay);
   };
 
-  const rearmWhileSpeaking = (delay = 70) => {
+  const rearmWhileSpeaking = (delay = 65) => {
     if (!state.speaking || state.userBarging) return;
     stopMonitoring();
     armInterruptionMonitoring(delay);
@@ -226,7 +239,7 @@
     if (!window.__voiceCallActive) return;
     setStatus('Interpreter AI is speaking', state.streamAnswer || 'You can interrupt me while I speak.');
     setOrb('speaking');
-    armInterruptionMonitoring(15);
+    armInterruptionMonitoring(10);
   };
 
   window.__nativeBargeInDetected = () => {
@@ -242,7 +255,7 @@
   };
 
   window.__nativeSpeechFinished = () => {
-    try { native.stopBargeInDetection?.(); } catch (_) {}
+    stopLiveMonitor();
     turn.monitorMode = 'none';
     if (turn.phase === 'barge-listening' || state.userBarging) return;
     turn.armGeneration += 1;
@@ -307,12 +320,12 @@
         beginBargeListening(value);
         submitCompletedTurn(value);
       } else {
-        rearmWhileSpeaking(70);
+        rearmWhileSpeaking(65);
       }
       return;
     }
     if (window.__voiceCallActive && state.speaking) {
-      rearmWhileSpeaking(70);
+      rearmWhileSpeaking(65);
       return;
     }
     submitCompletedTurn(value);
@@ -329,12 +342,12 @@
         native.setVoiceLanguage?.(callLanguage());
         setTimeout(() => {
           if (window.__voiceCallActive && turn.phase === 'barge-listening') native.startVoiceInput?.();
-        }, 55);
+        }, 45);
       }
       return;
     }
     if (window.__voiceCallActive && state.speaking) {
-      rearmWhileSpeaking(90);
+      rearmWhileSpeaking(80);
       return;
     }
     if (window.__voiceCallActive) {
@@ -345,7 +358,7 @@
         if (!window.__voiceCallActive || window.__voiceCallMuted || state.speaking) return;
         native.setVoiceLanguage?.(callLanguage());
         native.startVoiceInput?.();
-      }, 70);
+      }, 60);
     } else {
       const error = document.getElementById('chatError');
       if (error) error.textContent = message;
@@ -362,7 +375,6 @@
       }
       window.__voiceCallMuted = !window.__voiceCallMuted;
       event.currentTarget.classList.toggle('muted', window.__voiceCallMuted);
-      event.currentTarget.textContent = window.__voiceCallMuted ? '🔇' : '🎙';
       if (window.__voiceCallMuted) {
         turn.phase = 'idle';
         stopMonitoring();
@@ -372,7 +384,7 @@
       } else {
         turn.phase = 'listening';
         native.setVoiceLanguage?.(callLanguage());
-        setTimeout(() => native.startVoiceInput?.(), 35);
+        setTimeout(() => native.startVoiceInput?.(), 30);
       }
     };
   }
@@ -394,7 +406,7 @@
     resetCandidate();
     state.userBarging = false;
     state.bargeArmed = false;
-    try { native.stopBargeInDetection?.(); } catch (_) {}
+    stopLiveMonitor();
     return baseEndVoiceCall?.();
   };
   const endButton = document.getElementById('voiceEnd');

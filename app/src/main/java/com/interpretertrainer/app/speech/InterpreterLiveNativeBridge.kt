@@ -36,6 +36,7 @@ internal class InterpreterLiveNativeBridge(
 ) : TextToSpeech.OnInitListener {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val liveAudioOwnerId = "interpreter-live-output-${System.identityHashCode(this)}"
 
     @Volatile private var webView: WebView? = null
     @Volatile private var tts: TextToSpeech? = null
@@ -63,7 +64,18 @@ internal class InterpreterLiveNativeBridge(
         if (clean.isBlank() || !ttsReady) return false
 
         mainHandler.post {
+            // Pre-empt any recognizer/recorder that still owns the mic from the user's previous turn.
+            // Its coordinator callback cancels the stale capture before the VAD starts.
+            MicrophoneSessionCoordinator.acquire(liveAudioOwnerId) {
+                mainHandler.post {
+                    stopBargeDetector()
+                    runCatching { tts?.stop() }
+                    exitCommunicationMode()
+                }
+            }
+
             val engine = tts ?: run {
+                releaseLiveAudioLease()
                 evaluateJs("window.__nativeSpeechFinished?.();")
                 return@post
             }
@@ -78,6 +90,7 @@ internal class InterpreterLiveNativeBridge(
 
             if (!NaturalAndroidVoice.configure(engine, languageTag, 0.98f)) {
                 exitCommunicationMode()
+                releaseLiveAudioLease()
                 evaluateJs("window.__nativeSpeechFinished?.();")
                 return@post
             }
@@ -90,6 +103,7 @@ internal class InterpreterLiveNativeBridge(
             )
             if (result == TextToSpeech.ERROR) {
                 exitCommunicationMode()
+                releaseLiveAudioLease()
                 evaluateJs("window.__nativeSpeechFinished?.();")
             }
         }
@@ -102,14 +116,10 @@ internal class InterpreterLiveNativeBridge(
             runCatching { tts?.stop() }
             stopBargeDetector()
             exitCommunicationMode()
+            releaseLiveAudioLease()
         }
     }
 
-    /**
-     * Starts a VAD/AEC capture while AI speech is playing. It never transcribes the user; it only
-     * signals speech onset. Devices without usable acoustic echo cancellation fall back immediately
-     * to the existing recognizer-based monitor instead of silently losing interruption support.
-     */
     @JavascriptInterface
     fun startBargeInDetection(): Boolean {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -132,7 +142,7 @@ internal class InterpreterLiveNativeBridge(
     @SuppressLint("MissingPermission")
     private fun runBargeDetector() {
         val sampleRate = 16_000
-        val frameSamples = 320 // 20 ms
+        val frameSamples = 320
         val minBuffer = AudioRecord.getMinBufferSize(
             sampleRate,
             AudioFormat.CHANNEL_IN_MONO,
@@ -205,7 +215,6 @@ internal class InterpreterLiveNativeBridge(
                 val db = if (rms <= 1.0) -90f else (20.0 * log10(rms / 32768.0)).toFloat()
                 val peakNorm = peak / 32768f
 
-                // First ~100 ms learns the residual loudspeaker/AEC floor.
                 if (frameIndex < 5) {
                     baselineDb = if (frameIndex == 0) db else baselineDb * 0.68f + db * 0.32f
                     previousDb = db
@@ -213,8 +222,6 @@ internal class InterpreterLiveNativeBridge(
                     continue
                 }
 
-                // Deliberately sensitive once AEC has removed the far-end speech. Three sustained
-                // 20-ms frames are enough to barge in quickly but one transient is ignored.
                 val threshold = max(-52f, baselineDb + 5.0f)
                 val suddenOnset = db - previousDb >= 4.0f
                 val speechLike = (db >= threshold && peakNorm >= 0.018f) ||
@@ -267,9 +274,7 @@ internal class InterpreterLiveNativeBridge(
     }
 
     private fun enterCommunicationMode() {
-        if (previousAudioMode == null) {
-            previousAudioMode = audioManager.mode
-        }
+        if (previousAudioMode == null) previousAudioMode = audioManager.mode
         runCatching { audioManager.mode = AudioManager.MODE_IN_COMMUNICATION }
     }
 
@@ -277,6 +282,10 @@ internal class InterpreterLiveNativeBridge(
         val restore = previousAudioMode ?: AudioManager.MODE_NORMAL
         previousAudioMode = null
         runCatching { audioManager.mode = restore }
+    }
+
+    private fun releaseLiveAudioLease() {
+        MicrophoneSessionCoordinator.release(liveAudioOwnerId)
     }
 
     private fun evaluateJs(script: String) {
@@ -296,24 +305,28 @@ internal class InterpreterLiveNativeBridge(
                 override fun onDone(utteranceId: String?) {
                     stopBargeDetector()
                     exitCommunicationMode()
+                    releaseLiveAudioLease()
                     evaluateJs("window.__nativeSpeechFinished?.();")
                 }
 
                 override fun onStop(utteranceId: String?, interrupted: Boolean) {
                     stopBargeDetector()
                     exitCommunicationMode()
+                    releaseLiveAudioLease()
                 }
 
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
                     stopBargeDetector()
                     exitCommunicationMode()
+                    releaseLiveAudioLease()
                     evaluateJs("window.__nativeSpeechFinished?.();")
                 }
 
                 override fun onError(utteranceId: String?, errorCode: Int) {
                     stopBargeDetector()
                     exitCommunicationMode()
+                    releaseLiveAudioLease()
                     evaluateJs("window.__nativeSpeechFinished?.();")
                 }
             })
@@ -328,6 +341,7 @@ internal class InterpreterLiveNativeBridge(
             tts = null
             ttsReady = false
             exitCommunicationMode()
+            releaseLiveAudioLease()
             webView = null
         }
     }

@@ -1,9 +1,8 @@
 (() => {
-  if (window.__interpreterAiBootstrapV2) return 'ready';
-  window.__interpreterAiBootstrapV2 = true;
+  if (window.__interpreterAiBootstrapV3) return 'ready';
+  window.__interpreterAiBootstrapV3 = true;
 
   const byId = id => document.getElementById(id);
-  let connectionPromise = null;
 
   const setConnectionStatus = (text, state = 'idle') => {
     const statusText = byId('statusText');
@@ -19,69 +18,35 @@
     if (node) node.textContent = message || '';
   };
 
-  const sdkReady = () => Boolean(
-    window.puter?.auth?.isSignedIn &&
-    window.puter?.auth?.signIn &&
-    window.puter?.ai?.chat
-  );
+  const sdkReady = () => Boolean(window.puter?.ai?.chat);
 
-  const isSignedIn = () => {
-    try { return sdkReady() && window.puter.auth.isSignedIn() === true; }
-    catch (_) { return false; }
-  };
-
-  const connect = async () => {
+  const providerReady = () => {
     if (navigator.onLine === false) {
       setConnectionStatus('No internet connection', 'bad');
       setError('Interpreter AI needs an internet connection.');
       return false;
     }
-
     if (!sdkReady()) {
       setConnectionStatus('AI service unavailable', 'bad');
       setError('Interpreter AI could not load its online service. Check your connection and try again.');
       return false;
     }
 
-    if (isSignedIn()) {
-      setConnectionStatus('Online · ready', 'ok');
-      setError('');
-      return true;
-    }
-
-    if (connectionPromise) return connectionPromise;
-
-    // Puter requires signIn() to be initiated by a real user action because it opens a popup.
-    // This function is intentionally called only from Send/Evaluate/suggestion actions. Do not
-    // move it to a timer, page-load callback, coroutine retry, or background connection attempt.
-    connectionPromise = (async () => {
-      try {
-        setConnectionStatus('Connecting…');
-        setError('');
-        await window.puter.auth.signIn({ attempt_temp_user_creation: true });
-        if (!isSignedIn()) throw new Error('Authentication did not complete.');
-        setConnectionStatus('Online · ready', 'ok');
-        setError('');
-        return true;
-      } catch (error) {
-        const message = error?.msg || error?.message || String(error || 'Connection failed');
-        const cancelled = /cancel|closed|auth_window_closed/i.test(message);
-        setConnectionStatus(cancelled ? 'AI ready · send to start' : 'Connection needed', cancelled ? 'idle' : 'bad');
-        if (!cancelled) setError('Could not connect Interpreter AI: ' + message);
-        return false;
-      } finally {
-        connectionPromise = null;
-      }
-    })();
-
-    return connectionPromise;
+    // Puter cloud methods authenticate automatically when they are actually invoked. Calling
+    // auth.signIn() ourselves inside Android WebView created a second popup/auth state machine and
+    // was the source of repeated auth_window_closed / "send to start" failures. The real AI call
+    // now owns authentication exactly as Puter documents for essential cloud methods.
+    setConnectionStatus('Online AI · ready', 'ok');
+    setError('');
+    return true;
   };
 
-  // Replace the bundled page helpers. sendChat() and evaluatePerformance() call ensureConnected()
-  // directly from their click handlers, preserving the browser user activation Puter needs.
-  window.connectAi = connect;
-  window.ensureConnected = connect;
-  window.__connectInterpreterAi = connect;
+  // Keep the legacy page API, but do not perform a separate manual login. sendChat() and
+  // evaluatePerformance() proceed directly to puter.ai.chat(), which performs provider-managed
+  // authentication on the first real request and then reuses the resulting session.
+  window.connectAi = providerReady;
+  window.ensureConnected = providerReady;
+  window.__connectInterpreterAi = providerReady;
 
   const refresh = () => {
     if (navigator.onLine === false) {
@@ -92,12 +57,10 @@
       setConnectionStatus('Loading AI service…');
       return;
     }
-    if (isSignedIn()) setConnectionStatus('Online · ready', 'ok');
-    else setConnectionStatus('AI ready · send to start');
+    setConnectionStatus('Online AI · ready', 'ok');
+    setError('');
   };
 
-  // The SDK is loaded by a blocking script tag before the coach's own script, but WebView can be
-  // unusually slow after process startup. Poll status only; never authenticate from this timer.
   let refreshAttempts = 0;
   const refreshTimer = setInterval(() => {
     refresh();

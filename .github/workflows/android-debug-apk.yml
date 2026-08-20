@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Verify live Puter model catalog contains Qwen3.6 27B
         shell: bash
         run: |
@@ -29,6 +32,14 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Validate Interpreter AI browser scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check app/src/main/assets/interpreter_fast_voice.js
+          node --check app/src/main/assets/interpreter_precise_barge_in.js
+          node --check app/src/main/assets/interpreter_standard_arabic.js
+
       - name: Install headless Chromium
         working-directory: /tmp
         run: |
@@ -37,6 +48,79 @@ jobs:
           npm init -y >/dev/null
           npm install --silent playwright@1.55.0
           npx playwright install chromium
+
+      - name: Verify precise voice interruption filter
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/puter-ci/barge-test.cjs <<'NODE'
+          const { chromium } = require('playwright');
+          const path = require('path');
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            await page.setContent(`<!doctype html><html><body>
+              <textarea id="chatInput"></textarea>
+              <div id="voiceOrb"></div>
+              <div id="voiceCallStatus"></div>
+              <div id="voiceCallLive"></div>
+              <div id="chatError"></div>
+              <select id="callVoiceLang"><option value="en-US" selected>English</option></select>
+              <script>
+                var busy = false;
+                window.__voiceCallActive = true;
+                window.__voiceCallMuted = false;
+                window.__fastInterpreterVoiceV3 = true;
+                window.__fastInterpreterVoiceState = {
+                  queue: [], speaking: true, streamComplete: false,
+                  streamAnswer: 'The economy is growing strongly and employment continues to improve.',
+                  speechReference: 'The economy is growing strongly and employment continues to improve.',
+                  bargeArmed: true, userBarging: false, responseId: 1, language: 'en-US'
+                };
+                window.__stops = 0;
+                window.__starts = 0;
+                window.InterpreterNative = {
+                  stopSpeaking(){ window.__stops += 1; },
+                  startVoiceInput(){ window.__starts += 1; },
+                  setVoiceLanguage(){}
+                };
+                window.stopNaturalInterpreterVoice = function(){};
+                window.__voiceInputStopped = function(){};
+                window.hideTyping = function(){};
+                window.updateSendState = function(){};
+                window.resizeComposer = function(){};
+                window.sendChat = function(){};
+              </script>
+            </body></html>`);
+
+            const patch = path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_precise_barge_in.js');
+            await page.addScriptTag({ path: patch });
+
+            await page.evaluate(() => {
+              window.__voiceInputPartial('the economy is growing');
+              window.__voiceInputPartial('the economy is growing strongly');
+              window.__voiceInputPartial('uh');
+            });
+            let stops = await page.evaluate(() => window.__stops);
+            if (stops !== 0) throw new Error(`Echo/noise incorrectly interrupted AI (${stops} stops).`);
+
+            await page.evaluate(() => window.__voiceInputPartial('actually I mean'));
+            await page.waitForTimeout(145);
+            stops = await page.evaluate(() => window.__stops);
+            if (stops !== 0) throw new Error('A single partial result interrupted AI too early.');
+
+            await page.evaluate(() => window.__voiceInputPartial('actually I mean the other point'));
+            stops = await page.evaluate(() => window.__stops);
+            if (stops !== 1) throw new Error(`Stable intentional speech did not interrupt exactly once (${stops} stops).`);
+
+            await browser.close();
+            console.log('Precise interruption filter passed echo, noise, and intentional-speech checks.');
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
+
+          cd /tmp/puter-ci
+          node barge-test.cjs
 
       - name: Verify Puter SDK loads and opens official authentication
         shell: bash
@@ -115,6 +199,8 @@ jobs:
         run: |
           set -euo pipefail
           test -f app/src/main/assets/interpreter_coach.html
+          test -f app/src/main/assets/interpreter_precise_barge_in.js
+          test -f app/src/main/assets/interpreter_standard_arabic.js
           test -f app/src/main/java/com/interpretertrainer/app/speech/MicrophoneSessionCoordinator.kt
           test -f app/src/main/java/com/interpretertrainer/app/speech/NaturalAndroidVoice.kt
           test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnDeviceInterpreterAi.kt
@@ -146,6 +232,7 @@ jobs:
           grep -q "MicrophoneSessionCoordinator" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q "NaturalAndroidVoice" app/src/main/java/com/interpretertrainer/app/ui/screens/ShadowingScreen.kt
           grep -q "NaturalAndroidVoice" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q "interpreter_precise_barge_in.js" app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt
 
           echo "Interpreter AI, microphone coordination and natural voice guards passed."
 

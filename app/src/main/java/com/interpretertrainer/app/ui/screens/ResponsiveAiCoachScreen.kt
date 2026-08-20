@@ -19,8 +19,8 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
- * Keeps Interpreter AI visually synchronized with the app theme and installs the low-latency,
- * interruptible live-voice layer after the existing coach page has initialized.
+ * Keeps Interpreter AI visually synchronized with the app theme and installs the online-AI and
+ * low-latency, interruptible live-voice layers after the existing coach page has initialized.
  *
  * Important: the coach itself must keep the real Activity context. Supplying a synthetic
  * configuration Context to the WebView/permission/dialog stack can make some Android builds crash
@@ -48,6 +48,11 @@ fun ResponsiveAiCoachScreen(
     val attachedWebView = remember { mutableStateOf<WebView?>(null) }
     val coachHtml = remember(context) {
         context.assets.open("interpreter_coach.html")
+            .bufferedReader(Charsets.UTF_8)
+            .use { it.readText() }
+    }
+    val aiBootstrapPatch = remember(context) {
+        context.assets.open("interpreter_ai_bootstrap.js")
             .bufferedReader(Charsets.UTF_8)
             .use { it.readText() }
     }
@@ -92,6 +97,7 @@ fun ResponsiveAiCoachScreen(
         darkTheme,
         liveBridge,
         coachHtml,
+        aiBootstrapPatch,
         nativeDuplexPatch,
         voicePatch,
         preciseBargeInPatch,
@@ -99,7 +105,7 @@ fun ResponsiveAiCoachScreen(
         standardArabicPatch
     ) {
         // Slow mobile WebView/Puter startup can exceed a few seconds. Keep retrying for about ten
-        // seconds, while still returning immediately as soon as every voice layer reports ready.
+        // seconds, while still returning immediately as soon as every required layer reports ready.
         repeat(90) {
             val webView = findCoachWebView(rootView)
             if (webView != null) {
@@ -123,15 +129,22 @@ fun ResponsiveAiCoachScreen(
                 runCatching {
                     webView.setBackgroundColor(if (darkTheme) 0xFF0E0F12.toInt() else 0xFFFBFBFD.toInt())
                     webView.evaluateJavascript(themeSyncScript(darkTheme), null)
-                    webView.evaluateJavascript(standardArabicPatch, null)
                 }
 
-                // Order matters. The native duplex proxy must exist before the fast voice layer
-                // captures window.InterpreterNative, otherwise it would keep using remote TTS.
-                if (evaluateForResult(webView, nativeDuplexPatch)) {
-                    if (evaluateForResult(webView, voicePatch)) {
-                        if (evaluateForResult(webView, preciseBargeInPatch)) {
-                            if (evaluateForResult(webView, liveLatencyPatch)) return@LaunchedEffect
+                // The AI bootstrap is intentionally independent of the optional voice layer. It
+                // makes first-run Puter authentication self-starting and retries it under the
+                // user's Send/Evaluate gesture when Android/WebView requires a user activation.
+                // Do not install later layers until this script itself has executed successfully.
+                if (evaluateForResult(webView, aiBootstrapPatch)) {
+                    runCatching { webView.evaluateJavascript(standardArabicPatch, null) }
+
+                    // Order matters. The native duplex proxy must exist before the fast voice layer
+                    // captures window.InterpreterNative, otherwise it would keep using remote TTS.
+                    if (evaluateForResult(webView, nativeDuplexPatch)) {
+                        if (evaluateForResult(webView, voicePatch)) {
+                            if (evaluateForResult(webView, preciseBargeInPatch)) {
+                                if (evaluateForResult(webView, liveLatencyPatch)) return@LaunchedEffect
+                            }
                         }
                     }
                 }

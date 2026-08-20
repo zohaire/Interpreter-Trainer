@@ -15,17 +15,16 @@ import com.interpretertrainer.app.speech.InterpreterLiveNativeBridge
 import com.interpretertrainer.app.ui.theme.ThemeMode
 import com.interpretertrainer.app.viewmodel.SessionViewModel
 import kotlinx.coroutines.delay
-import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 /**
- * Keeps Interpreter AI visually synchronized with the app theme and installs the online-AI and
- * low-latency, interruptible live-voice layers after the existing coach page has initialized.
+ * Keeps Interpreter AI synchronized with the app theme and installs the online AI + voice layers.
  *
- * Important: the coach itself must keep the real Activity context. Supplying a synthetic
- * configuration Context to the WebView/permission/dialog stack can make some Android builds crash
- * as soon as the AI screen is opened. Theme synchronization is therefore done inside the page with
- * CSS variables instead of replacing LocalContext.
+ * Voice UI is deliberately NOT gated on the advanced full-duplex bridge. The microphone button,
+ * language selector and Interpreter Live controls must always appear and remain usable through the
+ * normal InterpreterNative bridge even when a device cannot expose the optional low-latency duplex
+ * bridge. This avoids the WebView race that previously left users with a text-only coach screen.
  */
 @Composable
 fun ResponsiveAiCoachScreen(
@@ -46,41 +45,14 @@ fun ResponsiveAiCoachScreen(
         InterpreterLiveNativeBridge(context.applicationContext)
     }
     val attachedWebView = remember { mutableStateOf<WebView?>(null) }
-    val coachHtml = remember(context) {
-        context.assets.open("interpreter_coach.html")
-            .bufferedReader(Charsets.UTF_8)
-            .use { it.readText() }
-    }
-    val aiBootstrapPatch = remember(context) {
-        context.assets.open("interpreter_ai_bootstrap.js")
-            .bufferedReader(Charsets.UTF_8)
-            .use { it.readText() }
-    }
-    val nativeDuplexPatch = remember(context) {
-        context.assets.open("interpreter_live_native_duplex.js")
-            .bufferedReader(Charsets.UTF_8)
-            .use { it.readText() }
-    }
-    val voicePatch = remember(context) {
-        context.assets.open("interpreter_fast_voice.js")
-            .bufferedReader(Charsets.UTF_8)
-            .use { it.readText() }
-    }
-    val preciseBargeInPatch = remember(context) {
-        context.assets.open("interpreter_precise_barge_in.js")
-            .bufferedReader(Charsets.UTF_8)
-            .use { it.readText() }
-    }
-    val liveLatencyPatch = remember(context) {
-        context.assets.open("interpreter_live_latency.js")
-            .bufferedReader(Charsets.UTF_8)
-            .use { it.readText() }
-    }
-    val standardArabicPatch = remember(context) {
-        context.assets.open("interpreter_standard_arabic.js")
-            .bufferedReader(Charsets.UTF_8)
-            .use { it.readText() }
-    }
+
+    val coachHtml = remember(context) { readAsset(context, "interpreter_coach.html") }
+    val aiBootstrapPatch = remember(context) { readAsset(context, "interpreter_ai_bootstrap.js") }
+    val nativeDuplexPatch = remember(context) { readAsset(context, "interpreter_live_native_duplex.js") }
+    val voicePatch = remember(context) { readAsset(context, "interpreter_fast_voice.js") }
+    val preciseBargeInPatch = remember(context) { readAsset(context, "interpreter_precise_barge_in.js") }
+    val liveLatencyPatch = remember(context) { readAsset(context, "interpreter_live_latency.js") }
+    val standardArabicPatch = remember(context) { readAsset(context, "interpreter_standard_arabic.js") }
 
     DisposableEffect(liveBridge) {
         onDispose {
@@ -89,7 +61,7 @@ fun ResponsiveAiCoachScreen(
         }
     }
 
-    // Keep the normal Android Activity context for WebView, microphone permission and Puter auth.
+    // AiCoachScreen owns the Activity-context WebView and the reliable native mic/TTS bridge.
     AiCoachScreen(onBack = onBack, sessionViewModel = sessionViewModel)
 
     LaunchedEffect(
@@ -104,14 +76,14 @@ fun ResponsiveAiCoachScreen(
         liveLatencyPatch,
         standardArabicPatch
     ) {
-        // Slow mobile WebView/Puter startup can exceed a few seconds. Keep retrying for about ten
-        // seconds, while still returning immediately as soon as every required layer reports ready.
-        repeat(90) {
+        // Retry long enough for slow Android WebView/Puter startup. Voice controls are installed as
+        // soon as the coach DOM exists; optional duplex readiness can never block their appearance.
+        repeat(120) {
             val webView = findCoachWebView(rootView)
             if (webView != null) {
-                // addJavascriptInterface objects become visible to page JavaScript on the next load.
-                // Attach the native duplex bridge once, then reload the same bundled coach HTML.
                 if (attachedWebView.value !== webView) {
+                    // JavascriptInterface objects are exposed to JavaScript after a navigation.
+                    // Attach the optional duplex bridge once and reload the bundled coach once.
                     liveBridge.attachWebView(webView)
                     webView.addJavascriptInterface(liveBridge, "InterpreterLiveNative")
                     attachedWebView.value = webView
@@ -122,37 +94,45 @@ fun ResponsiveAiCoachScreen(
                         "UTF-8",
                         null
                     )
-                    delay(260)
-                    return@repeat
-                }
+                    delay(320)
+                } else if (evaluateForResult(webView, coachDomReadyScript())) {
+                    runCatching {
+                        webView.setBackgroundColor(
+                            if (darkTheme) 0xFF0E0F12.toInt() else 0xFFFBFBFD.toInt()
+                        )
+                        webView.evaluateJavascript(themeSyncScript(darkTheme), null)
+                    }
 
-                runCatching {
-                    webView.setBackgroundColor(if (darkTheme) 0xFF0E0F12.toInt() else 0xFFFBFBFD.toInt())
-                    webView.evaluateJavascript(themeSyncScript(darkTheme), null)
-                }
-
-                // The AI bootstrap is intentionally independent of the optional voice layer. It
-                // makes first-run Puter authentication self-starting and retries it under the
-                // user's Send/Evaluate gesture when Android/WebView requires a user activation.
-                // Do not install later layers until this script itself has executed successfully.
-                if (evaluateForResult(webView, aiBootstrapPatch)) {
+                    // Critical fix: install the core bootstrap first and independently. It creates
+                    // voiceLang, voiceBtn, voiceCallLaunch and voiceCallOverlay itself.
+                    runCatching { webView.evaluateJavascript(aiBootstrapPatch, null) }
                     runCatching { webView.evaluateJavascript(standardArabicPatch, null) }
 
-                    // Order matters. The native duplex proxy must exist before the fast voice layer
-                    // captures window.InterpreterNative, otherwise it would keep using remote TTS.
-                    if (evaluateForResult(webView, nativeDuplexPatch)) {
-                        if (evaluateForResult(webView, voicePatch)) {
-                            if (evaluateForResult(webView, preciseBargeInPatch)) {
-                                if (evaluateForResult(webView, liveLatencyPatch)) return@LaunchedEffect
-                            }
-                        }
+                    // Advanced native duplex is optional. A pending/unsupported duplex layer must
+                    // never prevent the normal microphone + voice conversation layer from loading.
+                    runCatching { webView.evaluateJavascript(nativeDuplexPatch, null) }
+                    runCatching { webView.evaluateJavascript(voicePatch, null) }
+                    runCatching { webView.evaluateJavascript(preciseBargeInPatch, null) }
+                    runCatching { webView.evaluateJavascript(liveLatencyPatch, null) }
+
+                    // Re-apply the bootstrap once after the optional layers. It is idempotent and
+                    // also refreshes the visible AIV5-LIVE connection marker on supported builds.
+                    runCatching { webView.evaluateJavascript(aiBootstrapPatch, null) }
+
+                    if (evaluateForResult(webView, voiceUiReadyScript())) {
+                        return@LaunchedEffect
                     }
                 }
             }
-            delay(120)
+            delay(140)
         }
     }
 }
+
+private fun readAsset(context: android.content.Context, name: String): String =
+    context.assets.open(name)
+        .bufferedReader(Charsets.UTF_8)
+        .use { it.readText() }
 
 private fun findCoachWebView(view: View): WebView? {
     if (view is WebView) return view
@@ -163,6 +143,23 @@ private fun findCoachWebView(view: View): WebView? {
     }
     return null
 }
+
+private fun coachDomReadyScript(): String = """
+(() => {
+  const ready = (document.readyState === 'interactive' || document.readyState === 'complete') &&
+    !!document.querySelector('.composer') && !!document.querySelector('.composer-shell') &&
+    !!document.getElementById('sendBtn');
+  return ready ? 'ready' : 'pending';
+})();
+""".trimIndent()
+
+private fun voiceUiReadyScript(): String = """
+(() => {
+  const ids = ['voiceLang','voiceBtn','voiceCallLaunch','voiceCallOverlay'];
+  const visible = ids.every(id => !!document.getElementById(id));
+  return visible ? 'ready' : 'pending';
+})();
+""".trimIndent()
 
 private fun themeSyncScript(darkTheme: Boolean): String = if (darkTheme) {
     """

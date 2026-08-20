@@ -9,9 +9,9 @@ on:
 
 jobs:
   puter-ai-browser-test:
-    name: Verify live Qwen catalog and auth flow
+    name: Verify live Qwen and Android first-turn auth
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,9 +36,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node --check app/src/main/assets/interpreter_ai_bootstrap.js
           node --check app/src/main/assets/interpreter_fast_voice.js
           node --check app/src/main/assets/interpreter_precise_barge_in.js
+          node --check app/src/main/assets/interpreter_live_latency.js
           node --check app/src/main/assets/interpreter_standard_arabic.js
+          grep -q '__interpreterAiBootstrapV4' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q '__fastInterpreterVoiceV4' app/src/main/assets/interpreter_fast_voice.js
+          grep -q 'Online AI · ready · AIV4' app/src/main/assets/interpreter_ai_bootstrap.js
+          if grep -q 'await ensureConnected' app/src/main/assets/interpreter_fast_voice.js; then
+            echo 'Interpreter AI must not await readiness before its first Puter request.'
+            exit 1
+          fi
 
       - name: Install headless Chromium
         working-directory: /tmp
@@ -71,7 +80,7 @@ jobs:
                 var busy = false;
                 window.__voiceCallActive = true;
                 window.__voiceCallMuted = false;
-                window.__fastInterpreterVoiceV3 = true;
+                window.__fastInterpreterVoiceV4 = true;
                 window.__fastInterpreterVoiceState = {
                   queue: [], speaking: true, streamComplete: false,
                   streamAnswer: 'The economy is growing strongly and employment continues to improve.',
@@ -122,51 +131,107 @@ jobs:
           cd /tmp/puter-ci
           node barge-test.cjs
 
-      - name: Verify Puter SDK loads and opens official authentication
+      - name: Verify first Qwen call keeps user activation
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/puter-ci/index.html <<'HTML'
-          <!doctype html><html><body>
-          <script src="https://js.puter.com/v2/"></script>
-          <button id="run" onclick="puter.auth.signIn({ attempt_temp_user_creation: true })">Connect</button>
-          </body></html>
-          HTML
-
-          python3 -m http.server 8765 --directory /tmp/puter-ci >/tmp/puter-http.log 2>&1 &
+          python3 -m http.server 8765 --directory "$GITHUB_WORKSPACE/app/src/main/assets" >/tmp/interpreter-ai-http.log 2>&1 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
 
-          cat > /tmp/puter-ci/test.cjs <<'NODE'
+          cat > /tmp/puter-ci/activation-test.cjs <<'NODE'
           const { chromium } = require('playwright');
+          const path = require('path');
+
           (async () => {
             const browser = await chromium.launch({ headless: true });
-            const context = await browser.newContext();
-            const page = await context.newPage();
-            await page.goto('http://127.0.0.1:8765', { waitUntil: 'networkidle', timeout: 60000 });
-            const sdkReady = await page.evaluate(() => Boolean(window.puter?.auth?.signIn && window.puter?.ai?.chat));
-            if (!sdkReady) throw new Error('Puter.js AI/auth SDK did not load.');
+            const page = await browser.newPage();
 
-            const popupPromise = page.waitForEvent('popup', { timeout: 30000 });
-            await page.click('#run');
-            const popup = await popupPromise;
-            await popup.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
-            const url = popup.url();
-            console.log('AUTH POPUP:', url);
-            if (!url.startsWith('https://puter.com/action/sign-in')) {
-              throw new Error(`Unexpected authentication URL: ${url}`);
+            await page.route('https://js.puter.com/v2/**', async route => {
+              await route.fulfill({
+                status: 200,
+                contentType: 'application/javascript',
+                body: `
+                  window.__chatCalls = [];
+                  window.__signInCalls = 0;
+                  window.puter = {
+                    auth: {
+                      isSignedIn(){ return false; },
+                      signIn(){ window.__signInCalls += 1; throw new Error('Manual signIn is forbidden in Android AI4'); }
+                    },
+                    ai: {
+                      chat(messages, options){
+                        window.__chatCalls.push({
+                          options,
+                          userActivation:Boolean(navigator.userActivation?.isActive)
+                        });
+                        if (options?.stream) {
+                          return (async function*(){ yield { text:'INTERPRETER_AI_OK' }; })();
+                        }
+                        return Promise.resolve({ message:{ content:'INTERPRETER_AI_OK' } });
+                      },
+                      txt2speech(){ return Promise.reject(new Error('not used')); }
+                    }
+                  };
+                `
+              });
+            });
+
+            await page.goto('http://127.0.0.1:8765/interpreter_coach.html', {
+              waitUntil:'domcontentloaded', timeout:60000
+            });
+            await page.addScriptTag({
+              path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_ai_bootstrap.js')
+            });
+            await page.evaluate(() => {
+              window.__interpreterEnhancementsV3 = true;
+              window.InterpreterNative = {
+                setVoiceLanguage(){}, startVoiceInput(){}, stopVoiceInput(){},
+                speakText(){ return false; }, stopSpeaking(){},
+                getPracticeContext(){ return 'No saved practice context.'; }
+              };
+            });
+            await page.addScriptTag({
+              path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_fast_voice.js')
+            });
+
+            const ready = await page.evaluate(() => ({
+              bootstrap:Boolean(window.__interpreterAiBootstrapV4),
+              voice:Boolean(window.__fastInterpreterVoiceV4),
+              status:document.getElementById('statusText')?.textContent || ''
+            }));
+            if (!ready.bootstrap || !ready.voice) throw new Error('AI4 Android layers did not load.');
+            if (!/AIV4/i.test(ready.status)) throw new Error(`AI4 build marker missing: ${ready.status}`);
+
+            await page.fill('#chatInput', 'Confirm AI works.');
+            await page.click('#sendBtn');
+            await page.waitForFunction(() => window.__chatCalls.length === 1, null, { timeout:10000 });
+            const result = await page.evaluate(() => ({
+              chatCalls:window.__chatCalls,
+              signInCalls:window.__signInCalls,
+              visible:Array.from(document.querySelectorAll('.message.assistant .bubble')).map(n => n.textContent || '')
+            }));
+            if (result.signInCalls !== 0) throw new Error('Android AI4 used manual signIn.');
+            if (!result.chatCalls[0]?.userActivation) {
+              throw new Error('First Qwen request lost transient user activation before Puter authentication.');
             }
-            if (!url.includes('attempt_temp_user_creation=true')) {
-              throw new Error('Temporary-user onboarding flag is missing from auth flow.');
+            if (result.chatCalls[0]?.options?.model !== 'qwen/qwen3.6-27b') {
+              throw new Error(`Wrong model: ${result.chatCalls[0]?.options?.model}`);
             }
+            if (!result.visible.some(text => text.includes('INTERPRETER_AI_OK'))) {
+              throw new Error('AI response was not rendered in the coach.');
+            }
+
             await browser.close();
+            console.log('Android AI4 first-turn activation test passed.');
           })().catch(err => { console.error(err); process.exit(1); });
           NODE
 
           cd /tmp/puter-ci
-          node test.cjs
+          node activation-test.cjs
 
   build:
+    needs: puter-ai-browser-test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -199,6 +264,8 @@ jobs:
         run: |
           set -euo pipefail
           test -f app/src/main/assets/interpreter_coach.html
+          test -f app/src/main/assets/interpreter_ai_bootstrap.js
+          test -f app/src/main/assets/interpreter_fast_voice.js
           test -f app/src/main/assets/interpreter_precise_barge_in.js
           test -f app/src/main/assets/interpreter_standard_arabic.js
           test -f app/src/main/java/com/interpretertrainer/app/speech/MicrophoneSessionCoordinator.kt
@@ -217,11 +284,13 @@ jobs:
           grep -q "qwen/qwen3.6-27b" app/src/main/assets/interpreter_coach.html
           grep -q "puter.ai.txt2speech" app/src/main/assets/interpreter_coach.html
           grep -q "playNaturalInterpreterVoice" app/src/main/assets/interpreter_coach.html
+          grep -q "__interpreterAiBootstrapV4" app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q "__fastInterpreterVoiceV4" app/src/main/assets/interpreter_fast_voice.js
+          grep -q "AIV4" app/src/main/assets/interpreter_ai_bootstrap.js
           if grep -q -E "qwen/qwen3.7-flash|qwen/qwen3.8-max" app/src/main/assets/interpreter_coach.html; then
             echo "Legacy Interpreter AI model routing is still present."
             exit 1
           fi
-          grep -q "attempt_temp_user_creation" app/src/main/assets/interpreter_coach.html
           grep -q "CoachChromeClient" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q "mediaPlaybackRequiresUserGesture = false" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
 
@@ -234,7 +303,7 @@ jobs:
           grep -q "NaturalAndroidVoice" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q "interpreter_precise_barge_in.js" app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt
 
-          echo "Interpreter AI, microphone coordination and natural voice guards passed."
+          echo "Interpreter AI4, microphone coordination and natural voice guards passed."
 
       - name: Test media link routing
         run: gradle --no-daemon :app:testDebugUnitTest

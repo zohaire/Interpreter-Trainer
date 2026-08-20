@@ -1,6 +1,7 @@
 (() => {
-  if (window.__interpreterAiBootstrapV3) return 'ready';
-  window.__interpreterAiBootstrapV3 = true;
+  if (window.__interpreterAiBootstrapV4) return 'ready';
+  window.__interpreterAiBootstrapV4 = true;
+  window.__interpreterAiCoreVersion = 'AIV4';
 
   const byId = id => document.getElementById(id);
 
@@ -20,44 +21,40 @@
 
   const sdkReady = () => Boolean(window.puter?.ai?.chat);
 
+  // This is deliberately synchronous. The first puter.ai.chat() call must still run inside the
+  // original Send tap so Android WebView keeps its transient user activation for Puter's first-use
+  // authentication window. Never turn this helper into an async function or await it before chat().
   const providerReady = () => {
     if (navigator.onLine === false) {
-      setConnectionStatus('No internet connection', 'bad');
+      setConnectionStatus('No internet connection · AIV4', 'bad');
       setError('Interpreter AI needs an internet connection.');
       return false;
     }
     if (!sdkReady()) {
-      setConnectionStatus('AI service unavailable', 'bad');
+      setConnectionStatus('AI service unavailable · AIV4', 'bad');
       setError('Interpreter AI could not load its online service. Check your connection and try again.');
       return false;
     }
 
-    // Puter cloud methods authenticate automatically when they are actually invoked. Starting a
-    // separate manual login inside Android WebView created a second popup/auth state machine and
-    // was the source of repeated auth_window_closed / "send to start" failures. The real AI call
-    // now owns authentication exactly as Puter documents for essential cloud methods.
-    setConnectionStatus('Online AI · ready', 'ok');
+    setConnectionStatus('Online AI · ready · AIV4', 'ok');
     setError('');
     return true;
   };
 
-  // Keep the legacy page API, but do not perform a separate manual login. sendChat() and
-  // evaluatePerformance() proceed directly to puter.ai.chat(), which performs provider-managed
-  // authentication on the first real request and then reuses the resulting session.
   window.connectAi = providerReady;
   window.ensureConnected = providerReady;
   window.__connectInterpreterAi = providerReady;
 
   const refresh = () => {
     if (navigator.onLine === false) {
-      setConnectionStatus('No internet connection', 'bad');
+      setConnectionStatus('No internet connection · AIV4', 'bad');
       return;
     }
     if (!sdkReady()) {
-      setConnectionStatus('Loading AI service…');
+      setConnectionStatus('Loading AI service · AIV4');
       return;
     }
-    setConnectionStatus('Online AI · ready', 'ok');
+    setConnectionStatus('Online AI · ready · AIV4', 'ok');
     setError('');
   };
 
@@ -70,7 +67,7 @@
 
   refresh();
   window.addEventListener('online', refresh);
-  window.addEventListener('offline', () => setConnectionStatus('No internet connection', 'bad'));
+  window.addEventListener('offline', () => setConnectionStatus('No internet connection · AIV4', 'bad'));
 
   return 'ready';
 })();

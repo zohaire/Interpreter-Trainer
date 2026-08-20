@@ -5,10 +5,13 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import com.interpretertrainer.app.speech.InterpreterLiveNativeBridge
 import com.interpretertrainer.app.ui.theme.ThemeMode
 import com.interpretertrainer.app.viewmodel.SessionViewModel
 import kotlinx.coroutines.delay
@@ -39,6 +42,20 @@ fun ResponsiveAiCoachScreen(
         ThemeMode.DARK -> true
     }
 
+    val liveBridge = remember(context) {
+        InterpreterLiveNativeBridge(context.applicationContext)
+    }
+    val attachedWebView = remember { mutableStateOf<WebView?>(null) }
+    val coachHtml = remember(context) {
+        context.assets.open("interpreter_coach.html")
+            .bufferedReader(Charsets.UTF_8)
+            .use { it.readText() }
+    }
+    val nativeDuplexPatch = remember(context) {
+        context.assets.open("interpreter_live_native_duplex.js")
+            .bufferedReader(Charsets.UTF_8)
+            .use { it.readText() }
+    }
     val voicePatch = remember(context) {
         context.assets.open("interpreter_fast_voice.js")
             .bufferedReader(Charsets.UTF_8)
@@ -60,12 +77,22 @@ fun ResponsiveAiCoachScreen(
             .use { it.readText() }
     }
 
+    DisposableEffect(liveBridge) {
+        onDispose {
+            liveBridge.dispose()
+            attachedWebView.value = null
+        }
+    }
+
     // Keep the normal Android Activity context for WebView, microphone permission and Puter auth.
     AiCoachScreen(onBack = onBack, sessionViewModel = sessionViewModel)
 
     LaunchedEffect(
         rootView,
         darkTheme,
+        liveBridge,
+        coachHtml,
+        nativeDuplexPatch,
         voicePatch,
         preciseBargeInPatch,
         liveLatencyPatch,
@@ -73,17 +100,39 @@ fun ResponsiveAiCoachScreen(
     ) {
         // Slow mobile WebView/Puter startup can exceed a few seconds. Keep retrying for about ten
         // seconds, while still returning immediately as soon as every voice layer reports ready.
-        repeat(80) {
+        repeat(90) {
             val webView = findCoachWebView(rootView)
             if (webView != null) {
+                // addJavascriptInterface objects become visible to page JavaScript on the next load.
+                // Attach the native duplex bridge once, then reload the same bundled coach HTML.
+                if (attachedWebView.value !== webView) {
+                    liveBridge.attachWebView(webView)
+                    webView.addJavascriptInterface(liveBridge, "InterpreterLiveNative")
+                    attachedWebView.value = webView
+                    webView.loadDataWithBaseURL(
+                        "https://interpreter-trainer.app/",
+                        coachHtml,
+                        "text/html",
+                        "UTF-8",
+                        null
+                    )
+                    delay(260)
+                    return@repeat
+                }
+
                 runCatching {
                     webView.setBackgroundColor(if (darkTheme) 0xFF0E0F12.toInt() else 0xFFFBFBFD.toInt())
                     webView.evaluateJavascript(themeSyncScript(darkTheme), null)
                     webView.evaluateJavascript(standardArabicPatch, null)
                 }
-                if (evaluateForResult(webView, voicePatch)) {
-                    if (evaluateForResult(webView, preciseBargeInPatch)) {
-                        if (evaluateForResult(webView, liveLatencyPatch)) return@LaunchedEffect
+
+                // Order matters. The native duplex proxy must exist before the fast voice layer
+                // captures window.InterpreterNative, otherwise it would keep using remote TTS.
+                if (evaluateForResult(webView, nativeDuplexPatch)) {
+                    if (evaluateForResult(webView, voicePatch)) {
+                        if (evaluateForResult(webView, preciseBargeInPatch)) {
+                            if (evaluateForResult(webView, liveLatencyPatch)) return@LaunchedEffect
+                        }
                     }
                 }
             }

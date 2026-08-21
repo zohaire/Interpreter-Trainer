@@ -24,21 +24,6 @@ jobs:
           gradle-version: '8.13'
       - name: Apply guarded migration
         run: python3 tools/apply_qwen38_upgrade.py
-      - name: Update permanent CI model guards
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('.github/workflows/android-debug-apk.yml')
-          text = path.read_text(encoding='utf-8')
-          text = text.replace('Qwen3.6 27B', 'Qwen3.8 Max')
-          text = text.replace('qwen/qwen3.6-27b', 'qwen/qwen3.8-max')
-          text = text.replace(
-              'qwen/qwen3.7-flash|qwen/qwen3.8-max',
-              'qwen/qwen3.7-flash|qwen/qwen3.6-27b'
-          )
-          path.write_text(text, encoding='utf-8')
-          PY
       - name: Verify model and attachments
         run: |
           grep -R "qwen/qwen3.8-max" app/src/main/assets app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
@@ -47,11 +32,10 @@ jobs:
           grep -q "puter.fs.upload" app/src/main/assets/interpreter_coach.html
           grep -q "puter_path" app/src/main/assets/interpreter_coach.html
           grep -q "onShowFileChooser" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q "qwen/qwen3.8-max" .github/workflows/android-debug-apk.yml
       - name: Build and test Android app
         run: |
           gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug --stacktrace
-      - name: Commit verified migration to feature branch
+      - name: Commit verified app migration
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -59,8 +43,7 @@ jobs:
             app/src/main/assets/interpreter_ai_bootstrap.js \
             app/src/main/assets/interpreter_fast_voice.js \
             app/src/main/assets/interpreter_coach.html \
-            app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt \
-            .github/workflows/android-debug-apk.yml
+            app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           if ! git diff --cached --quiet; then
             git commit -m "Upgrade Interpreter AI to Qwen3.8 Max and universal attachments"
             git push origin HEAD:feature/qwen38-signbridge

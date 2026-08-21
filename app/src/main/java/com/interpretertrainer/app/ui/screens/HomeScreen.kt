@@ -9,6 +9,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -22,6 +26,8 @@ import com.interpretertrainer.app.media.rememberAudioOutputRoute
 import com.interpretertrainer.app.ui.Routes
 import com.interpretertrainer.app.ui.theme.ThemeMode
 
+private enum class HomeWorkspace { INTERPRETING, SIGN_LANGUAGE }
+
 @Composable
 fun HomeScreen(
     onNavigate: (String) -> Unit,
@@ -30,6 +36,7 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val audioRoute = rememberAudioOutputRoute()
+    var workspace by rememberSaveable { mutableStateOf(HomeWorkspace.INTERPRETING) }
 
     Scaffold { padding ->
         LazyColumn(
@@ -66,7 +73,7 @@ fun HomeScreen(
                             )
                             Spacer(Modifier.height(5.dp))
                             Text(
-                                "Practice. Record. Review. Improve.",
+                                "Interpretation training and sign-language practice in one app.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             if (audioRoute.isExternal) {
@@ -99,42 +106,104 @@ fun HomeScreen(
             }
 
             item {
-                Text("Practice", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+                Text(
+                    "Workspace",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
             }
             item {
-                TrainingCard(
-                    "Simultaneous Interpretation",
-                    "Interpret from video/audio or source text, record your delivery, and transcribe in Arabic, English or French.",
-                    Icons.Default.Headphones
-                ) { onNavigate(Routes.SIMULTANEOUS) }
-            }
-            item {
-                TrainingCard(
-                    "Shadowing",
-                    "Shadow Arabic, English or French from media or AI text, record yourself, and review a live transcript.",
-                    Icons.Default.RecordVoiceOver
-                ) { onNavigate(Routes.SHADOWING) }
-            }
-            item {
-                TrainingCard(
-                    "Consecutive Interpretation",
-                    "Work through source segments or AI practice text with integrated three-language transcription.",
-                    Icons.Default.SkipNext
-                ) { onNavigate(Routes.CONSECUTIVE) }
-            }
-            item {
-                TrainingCard(
-                    "Live Transcription",
-                    "Capture speech in Arabic, English or French for review and practice.",
-                    Icons.Default.Mic
-                ) { onNavigate(Routes.TRANSCRIPTION) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = workspace == HomeWorkspace.INTERPRETING,
+                        onClick = { workspace = HomeWorkspace.INTERPRETING },
+                        label = { Text("Interpreting") },
+                        leadingIcon = { Icon(Icons.Default.Headphones, contentDescription = null) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = workspace == HomeWorkspace.SIGN_LANGUAGE,
+                        onClick = { workspace = HomeWorkspace.SIGN_LANGUAGE },
+                        label = { Text("Sign Language") },
+                        leadingIcon = { Icon(Icons.Default.RecordVoiceOver, contentDescription = null) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
 
-            item {
-                Text("Coach & review", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+            if (workspace == HomeWorkspace.INTERPRETING) {
+                item {
+                    Text("Interpretation studio", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+                }
+                item {
+                    TrainingCard(
+                        "Simultaneous Interpretation",
+                        "Interpret from video/audio or source text, record your delivery, and transcribe in Arabic, English or French.",
+                        Icons.Default.Headphones
+                    ) { onNavigate(Routes.SIMULTANEOUS) }
+                }
+                item {
+                    TrainingCard(
+                        "Shadowing",
+                        "Shadow Arabic, English or French from media or AI text, record yourself, and review a live transcript.",
+                        Icons.Default.RecordVoiceOver
+                    ) { onNavigate(Routes.SHADOWING) }
+                }
+                item {
+                    TrainingCard(
+                        "Consecutive Interpretation",
+                        "Work through source segments or AI practice text with integrated three-language transcription.",
+                        Icons.Default.SkipNext
+                    ) { onNavigate(Routes.CONSECUTIVE) }
+                }
+                item {
+                    TrainingCard(
+                        "Live Transcription",
+                        "Capture speech in Arabic, English or French for review and practice.",
+                        Icons.Default.Mic
+                    ) { onNavigate(Routes.TRANSCRIPTION) }
+                }
+                item {
+                    Text("Coach & review", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+                }
+                item {
+                    TrainingCard(
+                        "Interpreter Coach",
+                        "Qwen3.8 Max online AI with voice chat, universal file attachments, practice-text handoff and evaluation.",
+                        Icons.Default.AutoAwesome
+                    ) { onNavigate(Routes.AI_COACH) }
+                }
+                item {
+                    TrainingCard(
+                        "Practice History",
+                        "Review saved sessions, transcripts, recordings, notes and feedback.",
+                        Icons.Default.History
+                    ) { onNavigate(Routes.HISTORY) }
+                }
+            } else {
+                item {
+                    Text("Sign-language studio", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+                }
+                item {
+                    TrainingCard(
+                        "Sign Language Emulator",
+                        "Turn English text or uploaded text files into an ASL-oriented sequence with a human-proportioned 3D signer and safe fingerspelling fallback.",
+                        Icons.Default.RecordVoiceOver
+                    ) { onNavigate(Routes.SIGN_LANGUAGE) }
+                }
+                item {
+                    SectionCard {
+                        Text("Accuracy first", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "The emulator uses phrase-level rules where available and fingerspells unknown terms instead of inventing random signs. It is a training aid, not a certified human interpreter.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
-            item { TrainingCard("Interpreter Coach", "Use faster streaming AI, voice chat, practice-text handoff and performance evaluation.", Icons.Default.AutoAwesome) { onNavigate(Routes.AI_COACH) } }
-            item { TrainingCard("Practice History", "Review saved sessions, transcripts, recordings, notes and feedback.", Icons.Default.History) { onNavigate(Routes.HISTORY) } }
 
             item {
                 SectionCard {

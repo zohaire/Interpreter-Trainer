@@ -82,11 +82,7 @@ def patch_native_file_chooser() -> None:
     if "webView.webChromeClient = CoachChromeClient(context, onFileChooser)" not in text:
         if old_client not in text:
             raise RuntimeError("CoachChromeClient call anchor changed")
-        text = text.replace(
-            old_client,
-            "    webView.webChromeClient = CoachChromeClient(context, onFileChooser)\n",
-            1,
-        )
+        text = text.replace(old_client, "    webView.webChromeClient = CoachChromeClient(context, onFileChooser)\n", 1)
 
     old_class = "private class CoachChromeClient(private val context: Context) : WebChromeClient() {"
     new_class = """private class CoachChromeClient(
@@ -119,28 +115,162 @@ def patch_attachment_ui() -> None:
     script = r'''
 <script id="universal-attachment-support">
 (() => {
-  const readableExtensions = new Set(['txt','md','markdown','csv','tsv','json','xml','yaml','yml','srt','vtt','log','html','htm','css','js','mjs','ts','tsx','jsx','kt','java','py','rb','go','rs','c','cpp','h','hpp','sql','ini','toml','properties']);
-  let attachments = [];
   const composer = document.querySelector('.composer');
+  const shell = document.querySelector('.composer-shell');
   const sendButton = document.getElementById('sendBtn');
-  if (!composer || !sendButton) return;
+  const chatInput = document.getElementById('chatInput');
+  if (!composer || !shell || !sendButton || !chatInput) return;
+
+  let pending = [];
+  let uploading = false;
+  let armNextChat = false;
+
   const style = document.createElement('style');
-  style.textContent = `.attachment-btn{color:var(--accent)!important}.attachment-strip{width:min(780px,100%);margin:0 auto 7px;display:none;gap:6px;flex-wrap:wrap}.attachment-strip.show{display:flex}.attachment-chip{max-width:46%;padding:6px 9px;border:1px solid var(--border);border-radius:999px;background:var(--surface-soft);color:var(--muted);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`;
+  style.textContent = `.attachment-btn{color:var(--accent)!important;font-size:22px;font-weight:500}.attachment-strip{width:min(780px,100%);margin:0 auto 7px;display:none;gap:6px;flex-wrap:wrap}.attachment-strip.show{display:flex}.attachment-chip{max-width:48%;padding:6px 9px;border:1px solid var(--border);border-radius:999px;background:var(--surface-soft);color:var(--muted);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.attachment-chip.ready{color:var(--ok)}.attachment-chip.bad{color:var(--danger)}`;
   document.head.appendChild(style);
+
   const input = document.createElement('input');
-  input.id = 'interpreterAttachmentInput'; input.type = 'file'; input.accept = '*/*'; input.multiple = true; input.hidden = true;
+  input.id = 'interpreterAttachmentInput';
+  input.type = 'file';
+  input.accept = '*/*';
+  input.multiple = true;
+  input.hidden = true;
   document.body.appendChild(input);
+
   const attach = document.createElement('button');
-  attach.type = 'button'; attach.className = 'icon-btn attachment-btn'; attach.title = 'Attach files'; attach.setAttribute('aria-label','Attach files of any type'); attach.textContent = '+'; attach.onclick = () => input.click();
+  attach.type = 'button';
+  attach.className = 'icon-btn attachment-btn';
+  attach.title = 'Attach files';
+  attach.setAttribute('aria-label', 'Attach files of any type');
+  attach.textContent = '+';
+  attach.onclick = () => input.click();
   composer.insertBefore(attach, sendButton);
-  const strip = document.createElement('div'); strip.className = 'attachment-strip'; document.querySelector('.composer-shell')?.insertBefore(strip, composer);
-  const redraw = () => { strip.innerHTML = ''; strip.classList.toggle('show', attachments.length > 0); attachments.forEach(file => { const chip=document.createElement('div'); chip.className='attachment-chip'; chip.textContent=`${file.name} · ${Math.max(1,Math.round(file.size/1024))} KB`; strip.appendChild(chip); }); };
-  input.onchange = () => { attachments = [...input.files]; redraw(); input.value = ''; };
-  const isTextLike = file => { const ext=(file.name.split('.').pop()||'').toLowerCase(); return file.type.startsWith('text/') || readableExtensions.has(ext) || file.type.includes('json') || file.type.includes('xml'); };
-  const attachmentContext = async () => { if (!attachments.length) return ''; const blocks=[]; for (const file of attachments) { const header=`[Attached file: ${file.name}; type=${file.type||'unknown'}; size=${file.size} bytes]`; if (isTextLike(file) && file.size <= 6_000_000) { try { blocks.push(`${header}\n${(await file.text()).slice(0,120000)}`); continue; } catch (_) {} } blocks.push(`${header}\nThe file is attached in the app, but this binary format is not converted to text locally. Do not pretend to have read binary contents that are not present in the prompt.`); } return `\n\n--- ATTACHMENTS ---\n${blocks.join('\n\n')}\n--- END ATTACHMENTS ---`; };
-  let wrappedFunction = null;
-  const installSendWrapper = () => { const current=window.sendChat; if (typeof current !== 'function' || current === wrappedFunction) return; const original=current; wrappedFunction=async function(...args){ if(attachments.length){ const chatInput=document.getElementById('chatInput'); if(chatInput){ chatInput.value=`${chatInput.value||''}${await attachmentContext()}`; window.resizeComposer?.(); window.updateSendState?.(); attachments=[]; redraw(); } } return original.apply(this,args); }; window.sendChat=wrappedFunction; };
-  installSendWrapper(); let attempts=0; const installer=setInterval(()=>{ installSendWrapper(); if(++attempts>28) clearInterval(installer); },250);
+
+  const strip = document.createElement('div');
+  strip.className = 'attachment-strip';
+  shell.insertBefore(strip, composer);
+
+  const error = message => {
+    const box = document.getElementById('chatError');
+    if (box) box.textContent = message;
+  };
+
+  const redraw = () => {
+    strip.innerHTML = '';
+    strip.classList.toggle('show', pending.length > 0);
+    pending.forEach(item => {
+      const chip = document.createElement('div');
+      chip.className = 'attachment-chip ' + (item.status === 'ready' ? 'ready' : item.status === 'error' ? 'bad' : '');
+      chip.textContent = `${item.status === 'uploading' ? '↑ ' : item.status === 'ready' ? '✓ ' : item.status === 'error' ? '! ' : ''}${item.name}`;
+      chip.title = item.status === 'error' ? (item.error || 'Upload failed') : item.name;
+      strip.appendChild(chip);
+    });
+  };
+
+  const normalizeItems = value => Array.isArray(value) ? value : value ? [value] : [];
+  const pathsFromUpload = value => normalizeItems(value).map(item => item?.path).filter(Boolean);
+
+  input.onchange = async () => {
+    const files = [...(input.files || [])];
+    input.value = '';
+    if (!files.length) return;
+    if (!window.puter?.fs?.upload) {
+      error('File upload service is not available. Check the internet connection and try again.');
+      return;
+    }
+
+    const batch = files.map(file => ({ name:file.name, status:'uploading', path:null, error:null }));
+    pending.push(...batch);
+    uploading = true;
+    redraw();
+    error('');
+
+    try {
+      const result = await puter.fs.upload(files, './InterpreterTrainerUploads', {
+        createMissingParents: true,
+        dedupeName: true
+      });
+      const paths = pathsFromUpload(result);
+      if (paths.length !== files.length) throw new Error(`Uploaded ${paths.length} of ${files.length} files`);
+      batch.forEach((item, i) => {
+        item.path = paths[i];
+        item.status = 'ready';
+      });
+    } catch (e) {
+      batch.forEach(item => {
+        item.status = 'error';
+        item.error = e?.message || String(e);
+      });
+      error('One or more files could not be uploaded. Remove them by starting a new chat or choose the files again.');
+    } finally {
+      uploading = false;
+      redraw();
+    }
+  };
+
+  const blockWhileUploading = event => {
+    if (!uploading) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    error('Files are still uploading. Send after the attachment chips show ✓.');
+  };
+  sendButton.addEventListener('click', blockWhileUploading, true);
+  chatInput.addEventListener('keydown', event => {
+    if (uploading && event.key === 'Enter' && !event.shiftKey) blockWhileUploading(event);
+  }, true);
+
+  const installChatWrapper = () => {
+    const current = window.sendChat;
+    if (typeof current !== 'function' || current.__attachmentWrapper) return;
+    const wrapped = function(...args) {
+      const ready = pending.filter(item => item.status === 'ready' && item.path);
+      if (ready.length) armNextChat = true;
+      return current.apply(this, args);
+    };
+    wrapped.__attachmentWrapper = true;
+    window.sendChat = wrapped;
+  };
+
+  const installPuterWrapper = () => {
+    const ai = window.puter?.ai;
+    if (!ai || typeof ai.chat !== 'function' || ai.chat.__attachmentWrapper) return;
+    const original = ai.chat.bind(ai);
+    const wrapped = function(messages, options) {
+      if (!armNextChat) return original(messages, options);
+      armNextChat = false;
+      const ready = pending.filter(item => item.status === 'ready' && item.path);
+      if (!ready.length || !Array.isArray(messages)) return original(messages, options);
+
+      const cloned = messages.map(message => ({...message}));
+      let index = -1;
+      for (let i = cloned.length - 1; i >= 0; i--) {
+        if (cloned[i]?.role === 'user') { index = i; break; }
+      }
+      if (index < 0) return original(messages, options);
+
+      const originalContent = cloned[index].content;
+      const content = [];
+      if (Array.isArray(originalContent)) content.push(...originalContent);
+      else content.push({ type:'text', text:String(originalContent ?? '') });
+      ready.forEach(item => content.push({ type:'file', puter_path:item.path }));
+      cloned[index] = {...cloned[index], content};
+
+      pending = pending.filter(item => item.status !== 'ready');
+      redraw();
+      return original(cloned, options);
+    };
+    wrapped.__attachmentWrapper = true;
+    ai.chat = wrapped;
+  };
+
+  installChatWrapper();
+  installPuterWrapper();
+  let attempts = 0;
+  const installer = setInterval(() => {
+    installChatWrapper();
+    installPuterWrapper();
+    if (++attempts > 80) clearInterval(installer);
+  }, 250);
 })();
 </script>
 '''
@@ -157,10 +287,12 @@ def verify() -> None:
                 leftovers.append(str(path))
     if leftovers:
         raise RuntimeError("Old Qwen model remains in: " + ", ".join(leftovers))
+
     coach = Path("app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt").read_text(encoding="utf-8")
     html = Path("app/src/main/assets/interpreter_coach.html").read_text(encoding="utf-8")
-    if "onShowFileChooser" not in coach or "interpreterAttachmentInput" not in html:
-        raise RuntimeError("Universal attachment integration incomplete")
+    required_html = ("interpreterAttachmentInput", "puter.fs.upload", "puter_path")
+    if "onShowFileChooser" not in coach or not all(marker in html for marker in required_html):
+        raise RuntimeError("Universal Puter attachment integration incomplete")
 
 
 if __name__ == "__main__":

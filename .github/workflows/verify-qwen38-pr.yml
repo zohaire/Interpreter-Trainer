@@ -18,8 +18,10 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-          cache: gradle
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
       - name: Apply guarded migration
         run: python3 tools/apply_qwen38_upgrade.py
       - name: Update permanent CI model guards
@@ -46,8 +48,7 @@ jobs:
           grep -q "qwen/qwen3.8-max" .github/workflows/android-debug-apk.yml
       - name: Build and test Android app
         run: |
-          chmod +x ./gradlew
-          ./gradlew testDebugUnitTest assembleDebug --stacktrace
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug --stacktrace
       - name: Commit verified migration to feature branch
         run: |
           git config user.name "github-actions[bot]"

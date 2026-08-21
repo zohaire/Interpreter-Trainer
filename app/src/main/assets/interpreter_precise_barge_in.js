@@ -421,11 +421,11 @@
 
   const liveOrbButton = document.getElementById('voiceOrb');
   if (liveOrbButton) {
-    liveOrbButton.setAttribute('role', 'button');
-    liveOrbButton.setAttribute('tabindex', '0');
-    liveOrbButton.setAttribute('aria-label', 'Interrupt Interpreter Live and speak');
+    liveOrbButton.setAttribute?.('role', 'button');
+    liveOrbButton.setAttribute?.('tabindex', '0');
+    liveOrbButton.setAttribute?.('aria-label', 'Interrupt Interpreter Live and speak');
     liveOrbButton.title = 'Tap to interrupt Interpreter Live';
-    liveOrbButton.style.cursor = 'pointer';
+    if (liveOrbButton.style) liveOrbButton.style.cursor = 'pointer';
     liveOrbButton.onclick = window.__interpreterManualBargeIn;
     liveOrbButton.onkeydown = event => {
       if (event.key === 'Enter' || event.key === ' ') {

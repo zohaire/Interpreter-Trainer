@@ -44,6 +44,8 @@ jobs:
           grep -R "qwen/qwen3.8-max" app/src/main/assets app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           ! grep -R "qwen/qwen3.6-27b" app/src/main
           grep -q "interpreterAttachmentInput" app/src/main/assets/interpreter_coach.html
+          grep -q "puter.fs.upload" app/src/main/assets/interpreter_coach.html
+          grep -q "put er_path" app/src/main/assets/interpreter_coach.html || grep -q "puter_path" app/src/main/assets/interpreter_coach.html
           grep -q "onShowFileChooser" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q "qwen/qwen3.8-max" .github/workflows/android-debug-apk.yml
       - name: Build and test Android app
@@ -53,7 +55,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/assets/interpreter_ai_bootstrap.js app/src/main/assets/interpreter_coach.html app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt .github/workflows/android-debug-apk.yml
+          git add \
+            app/src/main/assets/interpreter_ai_bootstrap.js \
+            app/src/main/assets/interpreter_fast_voice.js \
+            app/src/main/assets/interpreter_coach.html \
+            app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt \
+            .github/workflows/android-debug-apk.yml
           if ! git diff --cached --quiet; then
             git commit -m "Upgrade Interpreter AI to Qwen3.8 Max and universal attachments"
             git push origin HEAD:feature/qwen38-signbridge

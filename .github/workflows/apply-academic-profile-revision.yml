@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - feature/qwen38-signbridge
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   apply-test-commit:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feature/qwen38-signbridge'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

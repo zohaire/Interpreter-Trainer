@@ -237,7 +237,7 @@
     if (!state.speaking) return;
     turn.phase = 'speaking';
     if (!window.__voiceCallActive) return;
-    setStatus('Interpreter AI is speaking', state.streamAnswer || 'You can interrupt me while I speak.');
+    setStatus('Interpreter AI is speaking', 'Tap the center icon or speak to interrupt.');
     setOrb('speaking');
     armInterruptionMonitoring(10);
   };
@@ -385,6 +385,52 @@
         turn.phase = 'listening';
         native.setVoiceLanguage?.(callLanguage());
         setTimeout(() => native.startVoiceInput?.(), 30);
+      }
+    };
+  }
+
+  window.__interpreterManualBargeIn = () => {
+    if (!window.__voiceCallActive || window.__voiceCallMuted) return false;
+
+    if (turn.phase === 'barge-listening' || state.userBarging) {
+      startRecognizerForInterruptedTurn();
+      return true;
+    }
+
+    if (state.speaking || state.bargeArmed || turn.phase === 'speaking') {
+      beginBargeListening('');
+      startRecognizerForInterruptedTurn();
+      return true;
+    }
+
+    stopMonitoring();
+    turn.phase = 'listening';
+    state.userBarging = false;
+    state.bargeArmed = false;
+    try { native.stopVoiceInput?.(); } catch (_) {}
+    native.setVoiceLanguage?.(callLanguage());
+    setStatus('Listening…', 'Go ahead — I am listening.');
+    setOrb('listening');
+    setTimeout(() => {
+      if (window.__voiceCallActive && !window.__voiceCallMuted && !state.speaking) {
+        native.startVoiceInput?.();
+      }
+    }, 30);
+    return true;
+  };
+
+  const liveOrbButton = document.getElementById('voiceOrb');
+  if (liveOrbButton) {
+    liveOrbButton.setAttribute('role', 'button');
+    liveOrbButton.setAttribute('tabindex', '0');
+    liveOrbButton.setAttribute('aria-label', 'Interrupt Interpreter Live and speak');
+    liveOrbButton.title = 'Tap to interrupt Interpreter Live';
+    liveOrbButton.style.cursor = 'pointer';
+    liveOrbButton.onclick = window.__interpreterManualBargeIn;
+    liveOrbButton.onkeydown = event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        window.__interpreterManualBargeIn();
       }
     };
   }

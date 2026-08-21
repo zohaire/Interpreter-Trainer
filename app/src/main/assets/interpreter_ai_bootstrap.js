@@ -234,6 +234,45 @@
       }
     };
 
+    // Manual tap-to-interrupt fallback. The precise barge-in layer replaces the core
+    // interruption function when it is ready, while this keeps the central orb usable immediately.
+    if (!window.__manualLiveInterruptUiV1) {
+      window.__manualLiveInterruptUiV1 = true;
+      const orbButton = byId('voiceOrb');
+      if (orbButton) {
+        orbButton.setAttribute('role', 'button');
+        orbButton.setAttribute('tabindex', '0');
+        orbButton.setAttribute('aria-label', 'Interrupt Interpreter Live and speak');
+        orbButton.title = 'Tap to interrupt Interpreter Live';
+        orbButton.style.cursor = 'pointer';
+
+        const interruptFromOrb = () => {
+          if (!window.__voiceCallActive || window.__voiceCallMuted) return false;
+          if (typeof window.__interpreterManualBargeIn === 'function') {
+            return window.__interpreterManualBargeIn() === true;
+          }
+          stopVoice();
+          try { native?.stopVoiceInput?.(); } catch (_) {}
+          native?.setVoiceLanguage?.(byId('callVoiceLang')?.value || 'en-US');
+          callStatus('Listening…', 'Go ahead — I am listening.');
+          setOrbState('listening');
+          setTimeout(() => {
+            if (window.__voiceCallActive && !window.__voiceCallMuted) native?.startVoiceInput?.();
+          }, 30);
+          return true;
+        };
+
+        window.interruptInterpreterLive = interruptFromOrb;
+        orbButton.onclick = interruptFromOrb;
+        orbButton.onkeydown = event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            interruptFromOrb();
+          }
+        };
+      }
+    }
+
     window.__voiceInputStarted = () => {
       byId('voiceBtn')?.classList.add('listening');
       setError('');

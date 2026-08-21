@@ -183,7 +183,7 @@
           const warmup = puter.ai.chat([
             { role:'system', content:'Initialize an interpreter-training voice session.' },
             { role:'user', content:'Reply only READY.' }
-          ], { model:'qwen/qwen3.6-27b', max_tokens:2, temperature:0 });
+          ], { model:'qwen/qwen3.8-max', max_tokens:2, temperature:0 });
           await warmup;
         }
       } catch (error) {
@@ -322,7 +322,7 @@
 
       // Invoke Puter NOW, before any await. This is the critical Android first-use auth fix.
       const request = puter.ai.chat(conversation, {
-        model:'qwen/qwen3.6-27b',
+        model:'qwen/qwen3.8-max',
         max_tokens: fromVoice ? 320 : 650,
         temperature:0.24
       });
@@ -369,7 +369,7 @@
         { role:'system', content:'You are a rigorous professional interpreter-performance evaluator. Do not invent evidence.' },
         { role:'user', content:prompt }
       ], {
-        model:'qwen/qwen3.6-27b',
+        model:'qwen/qwen3.8-max',
         max_tokens:1400,
         temperature:0.15
       });

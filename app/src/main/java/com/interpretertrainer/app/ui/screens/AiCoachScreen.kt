@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -20,6 +21,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -61,6 +63,14 @@ fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
     val context = LocalContext.current
     val bridgeHolder = remember { mutableStateOf<PracticeContextBridge?>(null) }
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
+    val fileCallbackRef = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        fileCallbackRef.value?.onReceiveValue(uris.toTypedArray())
+        fileCallbackRef.value = null
+    }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -81,6 +91,8 @@ fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
 
     DisposableEffect(Unit) {
         onDispose {
+            fileCallbackRef.value?.onReceiveValue(null)
+            fileCallbackRef.value = null
             bridge.dispose()
             webViewRef.value?.let { webView ->
                 runCatching { webView.stopLoading() }
@@ -98,7 +110,12 @@ fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
                 .fillMaxSize()
                 .padding(padding),
             factory = { webContext ->
-                createCoachWebView(webContext, bridge).also { webViewRef.value = it }
+                createCoachWebView(webContext, bridge) { callback ->
+                    fileCallbackRef.value?.onReceiveValue(null)
+                    fileCallbackRef.value = callback
+                    filePickerLauncher.launch(arrayOf("*/*"))
+                    true
+                }.also { webViewRef.value = it }
             },
             update = { webView ->
                 CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
@@ -409,7 +426,11 @@ private class PracticeContextBridge(
 }
 
 @SuppressLint("SetJavaScriptEnabled")
-private fun createCoachWebView(context: Context, bridge: PracticeContextBridge): WebView {
+private fun createCoachWebView(
+    context: Context,
+    bridge: PracticeContextBridge,
+    onFileChooser: (ValueCallback<Array<Uri>>) -> Boolean
+): WebView {
     val html = context.assets.open("interpreter_coach.html")
         .bufferedReader(Charsets.UTF_8)
         .use { it.readText() }
@@ -428,7 +449,7 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
             view?.evaluateJavascript(coachEnhancementScript(), null)
         }
     }
-    webView.webChromeClient = CoachChromeClient(context)
+    webView.webChromeClient = CoachChromeClient(context, onFileChooser)
 
     CookieManager.getInstance().apply {
         setAcceptCookie(true)
@@ -823,7 +844,7 @@ private fun coachEnhancementScript(): String = """
       const system = `You are Interpreter AI, a fast professional coach for interpreters. Work especially well across Arabic, English and French. Help with simultaneous and consecutive interpreting, shadowing, transcription, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. In voice conversations, sound natural, concise and conversational rather than like a written report. Respond directly in the user's language. Never invent scores, transcripts, history or app facts. The authoritative app/context information below is reliable.\n\n${nativePracticeContext()}`;
       const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
       const stream = await puter.ai.chat(conversation, {
-        model:'qwen/qwen3.6-27b',
+        model:'qwen/qwen3.8-max',
         stream:true,
         max_tokens:fromVoice ? 420 : 650,
         temperature:0.24
@@ -916,7 +937,19 @@ private fun configureCoachWebView(webView: WebView) {
     }
 }
 
-private class CoachChromeClient(private val context: Context) : WebChromeClient() {
+private class CoachChromeClient(
+    private val context: Context,
+    private val onFileChooser: (ValueCallback<Array<Uri>>) -> Boolean
+) : WebChromeClient() {
+    override fun onShowFileChooser(
+        webView: WebView?,
+        filePathCallback: ValueCallback<Array<Uri>>?,
+        fileChooserParams: WebChromeClient.FileChooserParams?
+    ): Boolean {
+        val callback = filePathCallback ?: return false
+        return onFileChooser(callback)
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreateWindow(
         view: WebView?,

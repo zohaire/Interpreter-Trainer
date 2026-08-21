@@ -326,7 +326,7 @@
       const system = 'You are Interpreter AI, a fast professional coach for interpreters. Work especially well across Arabic, English and French. Help with simultaneous and consecutive interpreting, shadowing, transcription, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. In voice conversations, answer naturally and directly in the user\'s language. Unless the user explicitly asks for detail, keep a voice reply to 1–2 short sentences and put the direct answer first. Never invent scores, transcripts, history or app facts. The authoritative app/context information below is reliable.\n\n' + nativePracticeContext();
       const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
       const stream = await puter.ai.chat(conversation, {
-        model:'qwen/qwen3.6-27b', stream:true, max_tokens:voiceResponse ? 180 : 650, temperature:0.20
+        model:'qwen/qwen3.8-max', stream:true, max_tokens:voiceResponse ? 180 : 650, temperature:0.20
       });
 
       if (responseId !== state.responseId) throw { __interrupted:true };

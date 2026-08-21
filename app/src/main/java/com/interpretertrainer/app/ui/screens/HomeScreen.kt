@@ -38,13 +38,31 @@ fun HomeScreen(
     val audioRoute = rememberAudioOutputRoute()
     var workspace by rememberSaveable { mutableStateOf(HomeWorkspace.INTERPRETING) }
 
-    Scaffold { padding ->
+    Scaffold(
+        floatingActionButton = {
+            if (workspace == HomeWorkspace.INTERPRETING) {
+                SmallFloatingActionButton(
+                    onClick = { onNavigate(Routes.AI_COACH) },
+                    shape = MaterialTheme.shapes.extraLarge,
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ) {
+                    Icon(
+                        Icons.Default.AutoAwesome,
+                        contentDescription = "Open Interpreter AI",
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        },
+        floatingActionButtonPosition = FabPosition.End
+    ) { padding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = 18.dp),
-            contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp),
+            contentPadding = PaddingValues(top = 20.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
@@ -167,14 +185,7 @@ fun HomeScreen(
                     ) { onNavigate(Routes.TRANSCRIPTION) }
                 }
                 item {
-                    Text("Coach & review", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
-                }
-                item {
-                    TrainingCard(
-                        "Interpreter Coach",
-                        "Qwen3.8 Max online AI with voice chat, universal file attachments, practice-text handoff and evaluation.",
-                        Icons.Default.AutoAwesome
-                    ) { onNavigate(Routes.AI_COACH) }
+                    Text("Review", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
                 }
                 item {
                     TrainingCard(
@@ -182,6 +193,14 @@ fun HomeScreen(
                         "Review saved sessions, transcripts, recordings, notes and feedback.",
                         Icons.Default.History
                     ) { onNavigate(Routes.HISTORY) }
+                }
+                item {
+                    Text(
+                        "Interpreter AI is available from the small ✦ button at the side.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
                 }
             } else {
                 item {

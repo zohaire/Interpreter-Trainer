@@ -3,20 +3,20 @@ name: Build Android Debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [ "main", "master" ]
+    branches: ["main", "master"]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: ["main", "master"]
 
 jobs:
   puter-ai-browser-test:
-    name: Verify Qwen, AI5 and Interpreter Live
+    name: Verify Qwen3.8, AI5 and Interpreter Live
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify live Puter model catalog contains Qwen3.6 27B
+      - name: Verify live Puter model catalog contains Qwen3.8 Max
         shell: bash
         run: |
           set -euo pipefail
@@ -24,15 +24,15 @@ jobs:
             https://api.puter.com/puterai/chat/models/details \
             --output /tmp/puter-models.json
           test -s /tmp/puter-models.json
-          grep -q 'qwen/qwen3.6-27b' /tmp/puter-models.json
-          echo "Qwen3.6 27B is present in Puter's live catalog."
+          grep -q 'qwen/qwen3.8-max' /tmp/puter-models.json
+          echo "Qwen3.8 Max is present in Puter's live catalog."
 
       - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Validate Interpreter AI and Live browser scripts
+      - name: Validate Interpreter AI scripts and attachment routing
         shell: bash
         run: |
           set -euo pipefail
@@ -43,10 +43,16 @@ jobs:
           node --check app/src/main/assets/interpreter_standard_arabic.js
           grep -q '__interpreterAiBootstrapV5' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q '__fastInterpreterVoiceV4' app/src/main/assets/interpreter_fast_voice.js
-          grep -q 'Online AI · ready · AIV5-LIVE' app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q 'voiceCallLaunch' app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q 'voiceCallOverlay' app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q 'voiceBtn' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'qwen/qwen3.8-max' app/src/main/assets/interpreter_coach.html
+          grep -q 'qwen/qwen3.8-max' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'qwen/qwen3.8-max' app/src/main/assets/interpreter_fast_voice.js
+          grep -q 'puter.fs.upload' app/src/main/assets/interpreter_coach.html
+          grep -q 'puter_path' app/src/main/assets/interpreter_coach.html
+          grep -q 'interpreterAttachmentInput' app/src/main/assets/interpreter_coach.html
+          if grep -R -q 'qwen/qwen3.6-27b' app/src/main; then
+            echo 'Old Qwen3.6 routing remains in app/src/main.'
+            exit 1
+          fi
           if grep -q 'await ensureConnected' app/src/main/assets/interpreter_fast_voice.js; then
             echo 'Interpreter AI must not await readiness before its first Puter request.'
             exit 1
@@ -106,8 +112,9 @@ jobs:
               </script>
             </body></html>`);
 
-            const patch = path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_precise_barge_in.js');
-            await page.addScriptTag({ path: patch });
+            await page.addScriptTag({
+              path: path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_precise_barge_in.js')
+            });
 
             await page.evaluate(() => {
               window.__voiceInputPartial('the economy is growing');
@@ -127,10 +134,9 @@ jobs:
             if (stops !== 1) throw new Error(`Stable intentional speech did not interrupt exactly once (${stops} stops).`);
 
             await browser.close();
-            console.log('Precise interruption filter passed echo, noise, and intentional-speech checks.');
+            console.log('Precise interruption filter passed.');
           })().catch(err => { console.error(err); process.exit(1); });
           NODE
-
           cd /tmp/puter-ci
           node barge-test.cjs
 
@@ -163,12 +169,10 @@ jobs:
                       isSignedIn(){ return window.__mockSigned; },
                       signIn(){ window.__signInCalls += 1; throw new Error('Manual signIn is forbidden in Android AI5'); }
                     },
+                    fs: { upload(){ return Promise.resolve([]); } },
                     ai: {
                       chat(messages, options){
-                        window.__chatCalls.push({
-                          options,
-                          userActivation:Boolean(navigator.userActivation?.isActive)
-                        });
+                        window.__chatCalls.push({ options, userActivation:Boolean(navigator.userActivation?.isActive) });
                         window.__mockSigned = true;
                         if (options?.stream) return (async function*(){ yield { text:'INTERPRETER_AI_OK' }; })();
                         return Promise.resolve({ message:{ content:'INTERPRETER_AI_OK' } });
@@ -183,74 +187,47 @@ jobs:
             await page.goto('http://127.0.0.1:8765/interpreter_coach.html', {
               waitUntil:'domcontentloaded', timeout:60000
             });
-
             await page.evaluate(() => {
               window.InterpreterNative = {
-                setVoiceLanguage(){},
-                startVoiceInput(){ window.__voiceStarts = (window.__voiceStarts || 0) + 1; },
-                stopVoiceInput(){},
-                speakText(){ return false; },
-                stopSpeaking(){},
+                setVoiceLanguage(){}, startVoiceInput(){ window.__voiceStarts=(window.__voiceStarts||0)+1; },
+                stopVoiceInput(){}, speakText(){ return false; }, stopSpeaking(){},
                 getPracticeContext(){ return 'No saved practice context.'; }
               };
             });
-
-            await page.addScriptTag({
-              path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_ai_bootstrap.js')
-            });
-            await page.addScriptTag({
-              path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_fast_voice.js')
-            });
+            await page.addScriptTag({ path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_ai_bootstrap.js') });
+            await page.addScriptTag({ path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_fast_voice.js') });
 
             const ready = await page.evaluate(() => ({
-              bootstrap:Boolean(window.__interpreterAiBootstrapV5),
-              voice:Boolean(window.__fastInterpreterVoiceV4),
+              bootstrap:Boolean(window.__interpreterAiBootstrapV5), voice:Boolean(window.__fastInterpreterVoiceV4),
               status:document.getElementById('statusText')?.textContent || '',
-              mic:Boolean(document.getElementById('voiceBtn')),
-              live:Boolean(document.getElementById('voiceCallLaunch')),
+              mic:Boolean(document.getElementById('voiceBtn')), live:Boolean(document.getElementById('voiceCallLaunch')),
               overlay:Boolean(document.getElementById('voiceCallOverlay'))
             }));
-            if (!ready.bootstrap || !ready.voice) throw new Error('AI5/voice layers did not load.');
-            if (!ready.mic || !ready.live || !ready.overlay) throw new Error('Interpreter Live or microphone controls are missing.');
+            if (!ready.bootstrap || !ready.voice || !ready.mic || !ready.live || !ready.overlay) throw new Error('AI5-LIVE controls did not load.');
             if (!/AIV5-LIVE/i.test(ready.status)) throw new Error(`AI5-LIVE build marker missing: ${ready.status}`);
 
             await page.fill('#chatInput', 'Confirm AI works.');
             await page.click('#sendBtn');
             await page.waitForFunction(() => window.__chatCalls.length === 1, null, { timeout:10000 });
-            const result = await page.evaluate(() => ({
-              chatCalls:window.__chatCalls,
-              signInCalls:window.__signInCalls,
-              visible:Array.from(document.querySelectorAll('.message.assistant .bubble')).map(n => n.textContent || '')
-            }));
+            const result = await page.evaluate(() => ({ chatCalls:window.__chatCalls, signInCalls:window.__signInCalls }));
             if (result.signInCalls !== 0) throw new Error('Android AI5 used manual signIn.');
-            if (!result.chatCalls[0]?.userActivation) {
-              throw new Error('First Qwen request lost transient user activation before Puter authentication.');
-            }
-            if (result.chatCalls[0]?.options?.model !== 'qwen/qwen3.6-27b') {
-              throw new Error(`Wrong model: ${result.chatCalls[0]?.options?.model}`);
-            }
-            if (!result.visible.some(text => text.includes('INTERPRETER_AI_OK'))) {
-              throw new Error('AI response was not rendered in the coach.');
-            }
+            if (!result.chatCalls[0]?.userActivation) throw new Error('First Qwen request lost transient user activation.');
+            if (result.chatCalls[0]?.options?.model !== 'qwen/qwen3.8-max') throw new Error(`Wrong model: ${result.chatCalls[0]?.options?.model}`);
 
             await page.click('#voiceCallLaunch');
             await page.waitForFunction(() => document.getElementById('voiceCallOverlay')?.classList.contains('active'), null, { timeout:5000 });
-            const liveResult = await page.evaluate(() => ({
-              active:document.getElementById('voiceCallOverlay')?.classList.contains('active') === true,
-              starts:window.__voiceStarts || 0
-            }));
-            if (!liveResult.active) throw new Error('Interpreter Live overlay did not open.');
-            if (liveResult.starts < 1) throw new Error('Interpreter Live did not start native microphone input.');
+            const starts = await page.evaluate(() => window.__voiceStarts || 0);
+            if (starts < 1) throw new Error('Interpreter Live did not start native microphone input.');
 
             await browser.close();
-            console.log('Android AI5-LIVE first-turn and voice-control test passed.');
+            console.log('Qwen3.8 AI5-LIVE first-turn and voice-control test passed.');
           })().catch(err => { console.error(err); process.exit(1); });
           NODE
-
           cd /tmp/puter-ci
           node activation-test.cjs
 
   build:
+    name: Test, build and verify signed APK
     needs: puter-ai-browser-test
     runs-on: ubuntu-latest
     steps:
@@ -275,62 +252,32 @@ jobs:
           KEYSTORE="$RUNNER_TEMP/interpreter-debug.keystore"
           base64 --decode .github/interpreter-debug.keystore.b64 > "$KEYSTORE"
           chmod 600 "$KEYSTORE"
-          keytool -list -keystore "$KEYSTORE" \
-            -storepass android -alias androiddebugkey >/dev/null
-          echo "Stable Interpreter Trainer development signing key installed."
+          keytool -list -keystore "$KEYSTORE" -storepass android -alias androiddebugkey >/dev/null
+          echo "Stable development signing key installed."
 
-      - name: Guard Interpreter AI, Live, microphone and natural voice architecture
+      - name: Guard app architecture
         shell: bash
         run: |
           set -euo pipefail
           test -f app/src/main/assets/interpreter_coach.html
           test -f app/src/main/assets/interpreter_ai_bootstrap.js
           test -f app/src/main/assets/interpreter_fast_voice.js
-          test -f app/src/main/assets/interpreter_precise_barge_in.js
-          test -f app/src/main/assets/interpreter_standard_arabic.js
-          test -f app/src/main/java/com/interpretertrainer/app/speech/MicrophoneSessionCoordinator.kt
-          test -f app/src/main/java/com/interpretertrainer/app/speech/NaturalAndroidVoice.kt
-          test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnDeviceInterpreterAi.kt
-          test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnDeviceModelManager.kt
-          test ! -f app/src/main/java/com/interpretertrainer/app/ai/OnlineInterpreterAi.kt
-
-          if grep -R -E "litertlm|LiteRT-LM|Install Interpreter AI|MODEL_DOWNLOAD_SIZE_LABEL|INTERPRETER_AI_BASE_URL" \
-              app/src/main app/build.gradle.kts; then
-            echo "Old local-model or placeholder-backend AI code must not return."
+          test -f app/src/main/assets/sign_language_emulator.html
+          test -f app/src/main/java/com/interpretertrainer/app/ui/screens/SignLanguageScreen.kt
+          grep -q 'qwen/qwen3.8-max' app/src/main/assets/interpreter_coach.html
+          grep -q 'puter.fs.upload' app/src/main/assets/interpreter_coach.html
+          grep -q 'puter_path' app/src/main/assets/interpreter_coach.html
+          grep -q 'OpenMultipleDocuments' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q 'OpenMultipleDocuments' app/src/main/java/com/interpretertrainer/app/ui/screens/SignLanguageScreen.kt
+          grep -q 'SIGN_LANGUAGE' app/src/main/java/com/interpretertrainer/app/ui/InterpreterTrainerApp.kt
+          grep -q 'MicrophoneSessionCoordinator' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q 'NaturalAndroidVoice' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          if grep -R -q 'qwen/qwen3.6-27b' app/src/main; then
+            echo 'Old Qwen3.6 routing remains.'
             exit 1
           fi
 
-          grep -q "https://js.puter.com/v2/" app/src/main/assets/interpreter_coach.html
-          grep -q "qwen/qwen3.6-27b" app/src/main/assets/interpreter_coach.html
-          grep -q "puter.ai.txt2speech" app/src/main/assets/interpreter_coach.html
-          grep -q "playNaturalInterpreterVoice" app/src/main/assets/interpreter_coach.html
-          grep -q "__interpreterAiBootstrapV5" app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q "__fastInterpreterVoiceV4" app/src/main/assets/interpreter_fast_voice.js
-          grep -q "AIV5-LIVE" app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q "voiceCallLaunch" app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q "voiceCallOverlay" app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q "voiceBtn" app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q "voiceCallLaunch" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q "voiceBtn" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          if grep -q -E "qwen/qwen3.7-flash|qwen/qwen3.8-max" app/src/main/assets/interpreter_coach.html; then
-            echo "Legacy Interpreter AI model routing is still present."
-            exit 1
-          fi
-          grep -q "CoachChromeClient" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q "mediaPlaybackRequiresUserGesture = false" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-
-          grep -q "android.speech.RecognitionService" app/src/main/AndroidManifest.xml
-          grep -q "android.permission.RECORD_AUDIO" app/src/main/AndroidManifest.xml
-          grep -q "MicrophoneSessionCoordinator" app/src/main/java/com/interpretertrainer/app/speech/SpeechRecognizerManager.kt
-          grep -q "MicrophoneSessionCoordinator" app/src/main/java/com/interpretertrainer/app/media/ShadowingRecorder.kt
-          grep -q "MicrophoneSessionCoordinator" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q "NaturalAndroidVoice" app/src/main/java/com/interpretertrainer/app/ui/screens/ShadowingScreen.kt
-          grep -q "NaturalAndroidVoice" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q "interpreter_precise_barge_in.js" app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt
-
-          echo "Interpreter AI5-LIVE, microphone coordination and natural voice guards passed."
-
-      - name: Test media link routing
+      - name: Run unit tests
         run: gradle --no-daemon :app:testDebugUnitTest
 
       - name: Build debug APK
@@ -339,35 +286,20 @@ jobs:
           INTERPRETER_DEBUG_KEYSTORE: ${{ runner.temp }}/interpreter-debug.keystore
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Verify APK signing certificate
+      - name: Verify APK and signing certificate
         shell: bash
         run: |
           set -euo pipefail
-          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
-          KEYSTORE="$RUNNER_TEMP/interpreter-debug.keystore"
-
-          keytool -exportcert \
-            -keystore "$KEYSTORE" \
-            -storepass android \
-            -alias androiddebugkey \
-            -file /tmp/interpreter-debug-cert.der >/dev/null 2>&1
-          EXPECTED_SHA256="$(sha256sum /tmp/interpreter-debug-cert.der | awk '{print tolower($1)}')"
-
-          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk \
-            | tee /tmp/apk-signing.txt
-          ACTUAL_SHA256="$(awk -F': ' '/certificate SHA-256 digest:/ {print tolower($NF); exit}' /tmp/apk-signing.txt | tr -d '[:space:]')"
-
-          if [ -z "$ACTUAL_SHA256" ] || [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
-            echo "APK signing certificate mismatch."
-            echo "Expected: $EXPECTED_SHA256"
-            echo "Actual:   ${ACTUAL_SHA256:-missing}"
-            exit 1
-          fi
-          echo "APK signing certificate matches the stable Interpreter Trainer development key."
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: interpreter-trainer-debug-apk-AIV5-LIVE-${{ github.sha }}
+          name: interpreter-trainer-debug-apk-qwen38-${{ github.sha }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 14

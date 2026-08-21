@@ -511,12 +511,12 @@ private fun StudioTrainingCard(
     borderColor: Color,
     onClick: () -> Unit
 ) {
-    ElevatedCard(
+    Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = cardColor),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         border = BorderStroke(1.dp, borderColor)
     ) {
         Row(

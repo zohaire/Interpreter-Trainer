@@ -45,7 +45,7 @@ jobs:
           ! grep -R "qwen/qwen3.6-27b" app/src/main
           grep -q "interpreterAttachmentInput" app/src/main/assets/interpreter_coach.html
           grep -q "puter.fs.upload" app/src/main/assets/interpreter_coach.html
-          grep -q "put er_path" app/src/main/assets/interpreter_coach.html || grep -q "puter_path" app/src/main/assets/interpreter_coach.html
+          grep -q "puter_path" app/src/main/assets/interpreter_coach.html
           grep -q "onShowFileChooser" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q "qwen/qwen3.8-max" .github/workflows/android-debug-apk.yml
       - name: Build and test Android app

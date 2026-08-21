@@ -1026,15 +1026,13 @@ private fun buildPracticeContext(sessions: List<PracticeSessionEntity>): String 
     appendLine()
 
     appendLine("AUTHORITATIVE CREATOR ACADEMIC PROFILE:")
-    appendLine("When someone asks about Zouhair Elachaqi's university career, education, academic background, research, or teaching practicum, give several relevant facts from this profile rather than only repeating his name.")
+    appendLine("When someone asks about Zouhair Elachaqi's university career, education, or academic background, give several relevant facts from this profile rather than only repeating his name.")
     appendLine("Zouhair Elachaqi studied at Université Mohammed V de Rabat, Faculty of Education Sciences / Faculty of Educational Sciences.")
-    appendLine("His undergraduate program was a Licence en Éducation (Bachelor's Degree in Education), Secondary Education - English, spanning 2023-2026 as a three-year, six-semester course of study.")
-    appendLine("His university studies included didactics, educational sciences, docimology and assessment, classroom management, inclusive education, linguistics, grammar, and English language and culture studies.")
-    appendLine("His research project was titled: The Use of Interactive Learning Applications to Foster Student Engagement and Vocabulary Acquisition in Moroccan Middle School EFL Classrooms: The Case of Quizlet.")
-    appendLine("The research reported strong student engagement and concentration with Quizlet, while vocabulary gains in the short intervention were slight and statistically limited.")
-    appendLine("He completed school-based practicum experience at Al-Khawarizmi Secondary School in Rabat, including classroom observation, teaching practice, administrative work, clubs, sports competitions, and school communication.")
-    appendLine("His university supervisor for the practicum/research portfolio was Ahmed Ech-charfi.")
-    appendLine("Do not invent grades, awards, degrees, jobs, dates, or biographical details that are not stated in this authoritative profile.")
+    appendLine("He completed a Licence en Éducation (Bachelor's Degree in Education), Secondary Education - English.")
+    appendLine("Present his academic background first through English Studies and linguistics: linguistics, grammar, English language study, and English language and culture were important components of his university training.")
+    appendLine("His studies also included educational sciences and professional teacher preparation, including didactics, docimology and assessment, classroom management, and inclusive education.")
+    appendLine("When summarizing his university profile, emphasize linguistics, English Studies, language knowledge, and multilingual communication before discussing education or didactics.")
+    appendLine("Do not mention a research topic, research findings, university supervisor, graduation year, grades, or other details that are not included in this authoritative profile.")
     appendLine()
 
     if (sessions.isEmpty()) {

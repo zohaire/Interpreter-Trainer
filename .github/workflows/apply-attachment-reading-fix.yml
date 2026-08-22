@@ -44,9 +44,9 @@ jobs:
           from pathlib import Path
           import re
           html=Path('app/src/main/assets/interpreter_coach.html').read_text(encoding='utf-8')
-          scripts=re.findall(r'<script>(.*?)</script>',html,flags=re.S)
-          assert scripts, 'No inline scripts found'
-          script=scripts[-1]
+          match=re.search(r'<script id="universal-attachment-support">(.*?)</script>',html,flags=re.S)
+          assert match, 'Attachment script not found'
+          script=match.group(1)
           assert "puter.ai.speech2txt" in script
           assert "DOC_READER_MODEL='claude-sonnet-4-6'" in script
           assert "ready.filter(item=>item.kind==='vision')" in script

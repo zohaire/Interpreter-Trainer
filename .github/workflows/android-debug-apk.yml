@@ -32,7 +32,7 @@ jobs:
           node --check app/src/main/assets/interpreter_standard_arabic.js
           grep -q '__interpreterAiBootstrapV5' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q '__fastInterpreterVoiceV4' app/src/main/assets/interpreter_fast_voice.js
-          grep -q "FREE_AI_MODEL='gemini-3.7-flash'" app/src/main/assets/interpreter_coach.html
+          grep -q "gemini-3.7-flash','gemini-3.6-flash','gemini-3.5-flash','gemini-3.5-flash-lite" app/src/main/assets/interpreter_coach.html
           grep -q 'generativelanguage.googleapis.com' app/src/main/assets/interpreter_coach.html
           grep -q 'getFreeAiApiKey' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'interpreterAttachmentInput' app/src/main/assets/interpreter_coach.html
@@ -65,7 +65,7 @@ jobs:
           npm install --silent playwright@1.55.0
           npx playwright install chromium
 
-      - name: Verify free Gemini chat and Interpreter Live launch
+      - name: Verify free Gemini failover and Interpreter Live launch
         shell: bash
         run: |
           set -euo pipefail
@@ -83,11 +83,20 @@ jobs:
             const calls = [];
 
             await page.route('https://generativelanguage.googleapis.com/**', async route => {
-              calls.push({ url:route.request().url(), body:route.request().postDataJSON() });
+              const url = route.request().url();
+              calls.push({ url, body:route.request().postDataJSON() });
+              if (/gemini-3\.7-flash:generateContent/.test(url)) {
+                await route.fulfill({
+                  status:503,
+                  contentType:'application/json',
+                  body:JSON.stringify({ error:{ message:'This model is currently experiencing high demand. Please try again later.' } })
+                });
+                return;
+              }
               await route.fulfill({
                 status:200,
                 contentType:'application/json',
-                body:JSON.stringify({ candidates:[{ content:{ parts:[{ text:'FREE_AI_OK' }] } }] })
+                body:JSON.stringify({ candidates:[{ content:{ parts:[{ text:'FREE_AI_FALLBACK_OK' }] } }] })
               });
             });
 
@@ -124,12 +133,15 @@ jobs:
             }));
             if (!ready.bootstrap || !ready.voice || !ready.live || !ready.overlay) throw new Error('Free AI / Interpreter Live controls did not load.');
 
-            await page.fill('#chatInput','Confirm free AI works.');
+            await page.fill('#chatInput','Confirm free AI fallback works.');
             await page.click('#sendBtn');
-            await page.waitForFunction(() => [...document.querySelectorAll('.assistant .bubble')].some(n => /FREE_AI_OK/.test(n.textContent || '')), null, { timeout:10000 });
-            if (calls.length !== 1) throw new Error(`Expected one Gemini API request, got ${calls.length}.`);
-            if (!/gemini-3\.7-flash:generateContent/.test(calls[0].url)) throw new Error('Wrong free Gemini endpoint.');
-            if (!calls[0].body?.contents?.length) throw new Error('Gemini request did not contain conversation content.');
+            await page.waitForFunction(() => [...document.querySelectorAll('.assistant .bubble')].some(n => /FREE_AI_FALLBACK_OK/.test(n.textContent || '')), null, { timeout:10000 });
+            if (calls.length !== 2) throw new Error(`Expected overloaded primary plus one fallback request, got ${calls.length}.`);
+            if (!/gemini-3\.7-flash:generateContent/.test(calls[0].url)) throw new Error('Primary request did not use Gemini 3.7 Flash.');
+            if (!/gemini-3\.6-flash:generateContent/.test(calls[1].url)) throw new Error('High-demand failure did not fall back to Gemini 3.6 Flash.');
+            if (!calls[1].body?.contents?.length) throw new Error('Fallback Gemini request did not contain conversation content.');
+            const activeModel = await page.evaluate(() => window.__interpreterAiActiveModel || '');
+            if (activeModel !== 'gemini-3.6-flash') throw new Error(`Wrong active fallback model: ${activeModel}`);
 
             await page.click('#voiceCallLaunch');
             await page.waitForFunction(() => document.getElementById('voiceCallOverlay')?.classList.contains('active'), null, { timeout:5000 });
@@ -137,7 +149,7 @@ jobs:
             if (starts < 1) throw new Error('Interpreter Live did not start native microphone input.');
 
             await browser.close();
-            console.log('Free Gemini chat and Interpreter Live browser test passed.');
+            console.log('Automatic free Gemini failover and Interpreter Live browser test passed.');
           })().catch(err => { console.error(err); process.exit(1); });
           NODE
 
@@ -183,7 +195,7 @@ jobs:
           test -f app/src/main/assets/sign_language_emulator.html
           test -f app/src/main/java/com/interpretertrainer/app/ui/screens/SignLanguageScreen.kt
           test -f app/src/main/java/com/interpretertrainer/app/ui/screens/LocalDocumentExtractor.kt
-          grep -q "FREE_AI_MODEL='gemini-3.7-flash'" app/src/main/assets/interpreter_coach.html
+          grep -q "gemini-3.7-flash','gemini-3.6-flash','gemini-3.5-flash','gemini-3.5-flash-lite" app/src/main/assets/interpreter_coach.html
           grep -q 'getFreeAiApiKey' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'OpenMultipleDocuments' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'OpenMultipleDocuments' app/src/main/java/com/interpretertrainer/app/ui/screens/SignLanguageScreen.kt
@@ -217,7 +229,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: interpreter-trainer-debug-apk-gemini37-${{ github.sha }}
+          name: interpreter-trainer-debug-apk-gemini-fallback-${{ github.sha }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14

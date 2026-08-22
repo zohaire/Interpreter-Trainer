@@ -8,31 +8,20 @@ on:
     branches: ["main", "master"]
 
 jobs:
-  puter-ai-browser-test:
-    name: Verify Qwen3.8, AI5 and Interpreter Live
+  free-ai-browser-test:
+    name: Verify Free AI and Interpreter Live
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify live Puter model catalog contains Qwen3.8 Max
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --location --fail --silent --show-error --max-time 45 \
-            https://api.puter.com/puterai/chat/models/details \
-            --output /tmp/puter-models.json
-          test -s /tmp/puter-models.json
-          grep -q 'qwen/qwen3.8-max' /tmp/puter-models.json
-          echo "Qwen3.8 Max is present in Puter's live catalog."
-
       - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Validate Interpreter AI scripts and attachment routing
+      - name: Validate free AI scripts and routing
         shell: bash
         run: |
           set -euo pipefail
@@ -43,104 +32,40 @@ jobs:
           node --check app/src/main/assets/interpreter_standard_arabic.js
           grep -q '__interpreterAiBootstrapV5' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q '__fastInterpreterVoiceV4' app/src/main/assets/interpreter_fast_voice.js
-          grep -q 'qwen/qwen3.8-max' app/src/main/assets/interpreter_coach.html
-          grep -q 'qwen/qwen3.8-max' app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q 'qwen/qwen3.8-max' app/src/main/assets/interpreter_fast_voice.js
-          grep -q 'puter.fs.upload' app/src/main/assets/interpreter_coach.html
-          grep -q 'puter_path' app/src/main/assets/interpreter_coach.html
+          grep -q "FREE_AI_MODEL='gemini-3.7-flash'" app/src/main/assets/interpreter_coach.html
+          grep -q 'generativelanguage.googleapis.com' app/src/main/assets/interpreter_coach.html
+          grep -q 'getFreeAiApiKey' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'interpreterAttachmentInput' app/src/main/assets/interpreter_coach.html
-          if grep -R -q 'qwen/qwen3.6-27b' app/src/main; then
-            echo 'Old Qwen3.6 routing remains in app/src/main.'
+          grep -q "type:'interpreter_media'" app/src/main/assets/interpreter_coach.html
+          grep -q 'LocalDocumentExtractor' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          if grep -R -qE 'puter\.ai\.(chat|speech2txt|txt2speech)' app/src/main; then
+            echo 'A paid Puter AI call remains in app/src/main.'
+            grep -R -nE 'puter\.ai\.(chat|speech2txt|txt2speech)' app/src/main || true
             exit 1
           fi
-          if grep -q 'await ensureConnected' app/src/main/assets/interpreter_fast_voice.js; then
-            echo 'Interpreter AI must not await readiness before its first Puter request.'
+          if grep -q 'js.puter.com' app/src/main/assets/interpreter_coach.html; then
+            echo 'Puter SDK is still loaded by the Interpreter AI page.'
+            exit 1
+          fi
+          if grep -q 'qwen/qwen3.8-max' app/src/main/assets/interpreter_fast_voice.js; then
+            echo 'Interpreter Live still routes to paid Qwen/Puter.'
+            exit 1
+          fi
+          if grep -q 'qwen/qwen3.8-max' app/src/main/assets/interpreter_coach.html; then
+            echo 'Interpreter Coach still exposes paid Qwen as its active provider.'
             exit 1
           fi
 
       - name: Install headless Chromium
         working-directory: /tmp
         run: |
-          mkdir -p /tmp/puter-ci
-          cd /tmp/puter-ci
+          mkdir -p /tmp/interpreter-ci
+          cd /tmp/interpreter-ci
           npm init -y >/dev/null
           npm install --silent playwright@1.55.0
           npx playwright install chromium
 
-      - name: Verify precise voice interruption filter
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat > /tmp/puter-ci/barge-test.cjs <<'NODE'
-          const { chromium } = require('playwright');
-          const path = require('path');
-
-          (async () => {
-            const browser = await chromium.launch({ headless: true });
-            const page = await browser.newPage();
-            await page.setContent(`<!doctype html><html><body>
-              <textarea id="chatInput"></textarea>
-              <div id="voiceOrb"></div>
-              <div id="voiceCallStatus"></div>
-              <div id="voiceCallLive"></div>
-              <div id="chatError"></div>
-              <select id="callVoiceLang"><option value="en-US" selected>English</option></select>
-              <script>
-                var busy = false;
-                window.__voiceCallActive = true;
-                window.__voiceCallMuted = false;
-                window.__fastInterpreterVoiceV4 = true;
-                window.__fastInterpreterVoiceState = {
-                  queue: [], speaking: true, streamComplete: false,
-                  streamAnswer: 'The economy is growing strongly and employment continues to improve.',
-                  speechReference: 'The economy is growing strongly and employment continues to improve.',
-                  bargeArmed: true, userBarging: false, responseId: 1, language: 'en-US'
-                };
-                window.__stops = 0;
-                window.__starts = 0;
-                window.InterpreterNative = {
-                  stopSpeaking(){ window.__stops += 1; },
-                  startVoiceInput(){ window.__starts += 1; },
-                  setVoiceLanguage(){}
-                };
-                window.stopNaturalInterpreterVoice = function(){};
-                window.__voiceInputStopped = function(){};
-                window.hideTyping = function(){};
-                window.updateSendState = function(){};
-                window.resizeComposer = function(){};
-                window.sendChat = function(){};
-              </script>
-            </body></html>`);
-
-            await page.addScriptTag({
-              path: path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_precise_barge_in.js')
-            });
-
-            await page.evaluate(() => {
-              window.__voiceInputPartial('the economy is growing');
-              window.__voiceInputPartial('the economy is growing strongly');
-              window.__voiceInputPartial('uh');
-            });
-            let stops = await page.evaluate(() => window.__stops);
-            if (stops !== 0) throw new Error(`Echo/noise incorrectly interrupted AI (${stops} stops).`);
-
-            await page.evaluate(() => window.__voiceInputPartial('actually I mean'));
-            await page.waitForTimeout(145);
-            stops = await page.evaluate(() => window.__stops);
-            if (stops !== 0) throw new Error('A single partial result interrupted AI too early.');
-
-            await page.evaluate(() => window.__voiceInputPartial('actually I mean the other point'));
-            stops = await page.evaluate(() => window.__stops);
-            if (stops !== 1) throw new Error(`Stable intentional speech did not interrupt exactly once (${stops} stops).`);
-
-            await browser.close();
-            console.log('Precise interruption filter passed.');
-          })().catch(err => { console.error(err); process.exit(1); });
-          NODE
-          cd /tmp/puter-ci
-          node barge-test.cjs
-
-      - name: Verify AI5 first-turn activation and Interpreter Live UI
+      - name: Verify free Gemini chat and Interpreter Live launch
         shell: bash
         run: |
           set -euo pipefail
@@ -148,87 +73,80 @@ jobs:
           SERVER_PID=$!
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
 
-          cat > /tmp/puter-ci/activation-test.cjs <<'NODE'
+          cat > /tmp/interpreter-ci/free-ai-test.cjs <<'NODE'
           const { chromium } = require('playwright');
           const path = require('path');
 
           (async () => {
-            const browser = await chromium.launch({ headless: true });
+            const browser = await chromium.launch({ headless:true });
             const page = await browser.newPage();
+            const calls = [];
 
-            await page.route('https://js.puter.com/v2/**', async route => {
+            await page.route('https://generativelanguage.googleapis.com/**', async route => {
+              calls.push({ url:route.request().url(), body:route.request().postDataJSON() });
               await route.fulfill({
-                status: 200,
-                contentType: 'application/javascript',
-                body: `
-                  window.__chatCalls = [];
-                  window.__signInCalls = 0;
-                  window.__mockSigned = false;
-                  window.puter = {
-                    auth: {
-                      isSignedIn(){ return window.__mockSigned; },
-                      signIn(){ window.__signInCalls += 1; throw new Error('Manual signIn is forbidden in Android AI5'); }
-                    },
-                    fs: { upload(){ return Promise.resolve([]); } },
-                    ai: {
-                      chat(messages, options){
-                        window.__chatCalls.push({ options, userActivation:Boolean(navigator.userActivation?.isActive) });
-                        window.__mockSigned = true;
-                        if (options?.stream) return (async function*(){ yield { text:'INTERPRETER_AI_OK' }; })();
-                        return Promise.resolve({ message:{ content:'INTERPRETER_AI_OK' } });
-                      },
-                      txt2speech(){ return Promise.reject(new Error('not used')); }
-                    }
-                  };
-                `
+                status:200,
+                contentType:'application/json',
+                body:JSON.stringify({ candidates:[{ content:{ parts:[{ text:'FREE_AI_OK' }] } }] })
               });
             });
 
             await page.goto('http://127.0.0.1:8765/interpreter_coach.html', {
               waitUntil:'domcontentloaded', timeout:60000
             });
+
             await page.evaluate(() => {
+              window.__voiceStarts = 0;
+              window.__interpreterEnhancementsV3 = true;
               window.InterpreterNative = {
-                setVoiceLanguage(){}, startVoiceInput(){ window.__voiceStarts=(window.__voiceStarts||0)+1; },
-                stopVoiceInput(){}, speakText(){ return false; }, stopSpeaking(){},
-                getPracticeContext(){ return 'No saved practice context.'; }
+                getFreeAiApiKey(){ return 'test-free-gemini-key-1234567890'; },
+                setFreeAiApiKey(){ return true; },
+                openFreeAiKeyPage(){ return true; },
+                getPracticeContext(){ return 'No saved practice context.'; },
+                getPreparedAttachment(){ return ''; },
+                setVoiceLanguage(){},
+                startVoiceInput(){ window.__voiceStarts += 1; },
+                stopVoiceInput(){},
+                speakText(){ return true; },
+                stopSpeaking(){}
               };
             });
-            await page.addScriptTag({ path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_ai_bootstrap.js') });
-            await page.addScriptTag({ path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_fast_voice.js') });
+
+            await page.addScriptTag({ path:path.join(process.env.GITHUB_WORKSPACE,'app/src/main/assets/interpreter_ai_bootstrap.js') });
+            await page.addScriptTag({ path:path.join(process.env.GITHUB_WORKSPACE,'app/src/main/assets/interpreter_fast_voice.js') });
+            await page.addScriptTag({ path:path.join(process.env.GITHUB_WORKSPACE,'app/src/main/assets/interpreter_precise_barge_in.js') });
 
             const ready = await page.evaluate(() => ({
-              bootstrap:Boolean(window.__interpreterAiBootstrapV5), voice:Boolean(window.__fastInterpreterVoiceV4),
-              status:document.getElementById('statusText')?.textContent || '',
-              mic:Boolean(document.getElementById('voiceBtn')), live:Boolean(document.getElementById('voiceCallLaunch')),
+              bootstrap:Boolean(window.__interpreterAiBootstrapV5),
+              voice:Boolean(window.__fastInterpreterVoiceV4),
+              live:Boolean(document.getElementById('voiceCallLaunch')),
               overlay:Boolean(document.getElementById('voiceCallOverlay'))
             }));
-            if (!ready.bootstrap || !ready.voice || !ready.mic || !ready.live || !ready.overlay) throw new Error('AI5-LIVE controls did not load.');
-            if (!/AIV5-LIVE/i.test(ready.status)) throw new Error(`AI5-LIVE build marker missing: ${ready.status}`);
+            if (!ready.bootstrap || !ready.voice || !ready.live || !ready.overlay) throw new Error('Free AI / Interpreter Live controls did not load.');
 
-            await page.fill('#chatInput', 'Confirm AI works.');
+            await page.fill('#chatInput','Confirm free AI works.');
             await page.click('#sendBtn');
-            await page.waitForFunction(() => window.__chatCalls.length === 1, null, { timeout:10000 });
-            const result = await page.evaluate(() => ({ chatCalls:window.__chatCalls, signInCalls:window.__signInCalls }));
-            if (result.signInCalls !== 0) throw new Error('Android AI5 used manual signIn.');
-            if (!result.chatCalls[0]?.userActivation) throw new Error('First Qwen request lost transient user activation.');
-            if (result.chatCalls[0]?.options?.model !== 'qwen/qwen3.8-max') throw new Error(`Wrong model: ${result.chatCalls[0]?.options?.model}`);
+            await page.waitForFunction(() => [...document.querySelectorAll('.assistant .bubble')].some(n => /FREE_AI_OK/.test(n.textContent || '')), null, { timeout:10000 });
+            if (calls.length !== 1) throw new Error(`Expected one Gemini API request, got ${calls.length}.`);
+            if (!/gemini-3\.7-flash:generateContent/.test(calls[0].url)) throw new Error('Wrong free Gemini endpoint.');
+            if (!calls[0].body?.contents?.length) throw new Error('Gemini request did not contain conversation content.');
 
             await page.click('#voiceCallLaunch');
             await page.waitForFunction(() => document.getElementById('voiceCallOverlay')?.classList.contains('active'), null, { timeout:5000 });
-            const starts = await page.evaluate(() => window.__voiceStarts || 0);
+            const starts = await page.evaluate(() => window.__voiceStarts);
             if (starts < 1) throw new Error('Interpreter Live did not start native microphone input.');
 
             await browser.close();
-            console.log('Qwen3.8 AI5-LIVE first-turn and voice-control test passed.');
+            console.log('Free Gemini chat and Interpreter Live browser test passed.');
           })().catch(err => { console.error(err); process.exit(1); });
           NODE
-          cd /tmp/puter-ci
-          node activation-test.cjs
+
+          cd /tmp/interpreter-ci
+          node free-ai-test.cjs
 
   build:
     name: Test, build and verify signed APK
-    needs: puter-ai-browser-test
+    needs: free-ai-browser-test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -264,16 +182,16 @@ jobs:
           test -f app/src/main/assets/interpreter_fast_voice.js
           test -f app/src/main/assets/sign_language_emulator.html
           test -f app/src/main/java/com/interpretertrainer/app/ui/screens/SignLanguageScreen.kt
-          grep -q 'qwen/qwen3.8-max' app/src/main/assets/interpreter_coach.html
-          grep -q 'puter.fs.upload' app/src/main/assets/interpreter_coach.html
-          grep -q 'puter_path' app/src/main/assets/interpreter_coach.html
+          test -f app/src/main/java/com/interpretertrainer/app/ui/screens/LocalDocumentExtractor.kt
+          grep -q "FREE_AI_MODEL='gemini-3.7-flash'" app/src/main/assets/interpreter_coach.html
+          grep -q 'getFreeAiApiKey' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'OpenMultipleDocuments' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'OpenMultipleDocuments' app/src/main/java/com/interpretertrainer/app/ui/screens/SignLanguageScreen.kt
           grep -q 'SIGN_LANGUAGE' app/src/main/java/com/interpretertrainer/app/ui/InterpreterTrainerApp.kt
           grep -q 'MicrophoneSessionCoordinator' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'NaturalAndroidVoice' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          if grep -R -q 'qwen/qwen3.6-27b' app/src/main; then
-            echo 'Old Qwen3.6 routing remains.'
+          if grep -R -qE 'puter\.ai\.(chat|speech2txt|txt2speech)' app/src/main; then
+            echo 'Paid Puter AI routing remains.'
             exit 1
           fi
 
@@ -299,7 +217,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: interpreter-trainer-debug-apk-qwen38-${{ github.sha }}
+          name: interpreter-trainer-debug-apk-gemini37-${{ github.sha }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14

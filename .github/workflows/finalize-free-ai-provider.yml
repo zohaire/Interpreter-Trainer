@@ -32,7 +32,7 @@ jobs:
       - name: Apply final payment-free routing
         run: python3 tools/finalize_free_ai_provider.py
 
-      - name: Validate JavaScript and permanent CI
+      - name: Validate JavaScript and proposed permanent CI
         shell: bash
         run: |
           set -euo pipefail
@@ -49,7 +49,7 @@ jobs:
       - name: Run Android tests and build
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug --stacktrace
 
-      - name: Commit verified production changes
+      - name: Commit verified application changes
         shell: bash
         run: |
           set -euo pipefail
@@ -57,8 +57,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- \
             app/src/main/assets/interpreter_coach.html \
-            app/src/main/assets/interpreter_fast_voice.js \
-            .github/workflows/android-debug-apk.yml
+            app/src/main/assets/interpreter_fast_voice.js
           if ! git diff --cached --quiet; then
             git commit -m "Remove remaining paid Puter AI routing"
             git pull --rebase origin feature/qwen38-signbridge

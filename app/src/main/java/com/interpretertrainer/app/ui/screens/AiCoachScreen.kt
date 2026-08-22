@@ -902,31 +902,13 @@ private fun coachEnhancementScript(): String = """
     try {
       const system = `You are Interpreter AI, a fast professional coach for interpreters. Work especially well across Arabic, English and French. Help with simultaneous and consecutive interpreting, shadowing, transcription, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. In voice conversations, sound natural, concise and conversational rather than like a written report. Respond directly in the user's language. Never invent scores, transcripts, history or app facts. The authoritative app/context information below is reliable.\n\n${nativePracticeContext()}`;
       const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
-      const stream = await puter.ai.chat(conversation, {
-        model:'qwen/qwen3.8-max',
-        stream:true,
-        max_tokens:fromVoice ? 420 : 650,
-        temperature:0.24
+      const result = await window.__interpreterAiRequest(conversation, {
+        model:'gemini-3.7-flash',
+        max_tokens:fromVoice ? 420 : 650
       });
 
       hideTyping();
-      streamRow = messageElement('assistant', '');
-      streamRow.dataset.streaming = '1';
-      document.getElementById('messages').appendChild(streamRow);
-      const bubble = streamRow.querySelector('.bubble');
-
-      for await (const part of stream) {
-        if (part?.type === 'error') throw new Error(part?.error?.message || part?.message || 'Streaming request failed.');
-        const chunk = typeof part === 'string'
-          ? part
-          : (typeof part?.text === 'string'
-              ? part.text
-              : (typeof part?.delta?.content === 'string' ? part.delta.content : ''));
-        if (!chunk) continue;
-        answer += chunk;
-        if (bubble) bubble.textContent = answer;
-        requestAnimationFrame(scrollToBottom);
-      }
+      answer = responseText(result);
 
       answer = answer.trim();
       if (!answer) throw new Error('The AI returned an empty response.');
@@ -937,7 +919,7 @@ private fun coachEnhancementScript(): String = """
       history = history.slice(-16);
       saveHistory();
       addMessage('assistant', answer);
-      setStatus('Online · ready', 'ok');
+      setStatus('Free AI · ready', 'ok');
 
       if (window.__voiceCallActive) {
         callStatus('Interpreter AI is speaking', answer);

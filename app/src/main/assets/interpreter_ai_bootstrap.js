@@ -350,9 +350,8 @@
       const system = `You are Interpreter AI, a fast professional coach for interpreters working especially in Arabic, English and French. Respond naturally and directly.\n\n${nativePracticeContext()}`;
       const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
 
-      // Invoke Puter NOW, before any await. This is the critical Android first-use auth fix.
-      const request = puter.ai.chat(conversation, {
-        model:'qwen/qwen3.8-max',
+      const request = window.__interpreterAiRequest(conversation, {
+        model:'gemini-3.7-flash',
         max_tokens: fromVoice ? 320 : 650,
         temperature:0.24
       });
@@ -365,7 +364,7 @@
       saveHistory();
       hideTyping();
       addMessage('assistant', answer);
-      setConnectionStatus('Online AI · ready · AIV5-LIVE', 'ok');
+      setConnectionStatus('Free AI · ready · AIV5-LIVE', 'ok');
     } catch (error) {
       hideTyping();
       const message = error?.msg || error?.message || String(error);
@@ -395,11 +394,11 @@
 
     try {
       const prompt = `Mode: ${byId('mode')?.value || 'not specified'}\nDirection: ${byId('languages')?.value || 'not specified'}\nSource duration: ${byId('sourceSeconds')?.value || 'not provided'}\nTrainee duration: ${byId('traineeSeconds')?.value || 'not provided'}\n\nSOURCE:\n${source}\n\nTRAINEE:\n${trainee}\n\nEvaluate meaning transfer, omissions, additions, numbers, names, terminology, register, fluency and give three concrete drills.`;
-      const request = puter.ai.chat([
+      const request = window.__interpreterAiRequest([
         { role:'system', content:'You are a rigorous professional interpreter-performance evaluator. Do not invent evidence.' },
         { role:'user', content:prompt }
       ], {
-        model:'qwen/qwen3.8-max',
+        model:'gemini-3.7-flash',
         max_tokens:1400,
         temperature:0.15
       });
@@ -420,7 +419,7 @@
         card.append(head, body);
         result.appendChild(card);
       }
-      setConnectionStatus('Online AI · ready · AIV5-LIVE', 'ok');
+      setConnectionStatus('Free AI · ready · AIV5-LIVE', 'ok');
     } catch (error) {
       const message = error?.msg || error?.message || String(error);
       if (result) result.innerHTML = '<div class="result-card error-box">Evaluation failed: ' + escapeHtml(message) + '</div>';
@@ -443,7 +442,7 @@
       setConnectionStatus('Loading AI service · AIV5-LIVE');
       return;
     }
-    setConnectionStatus('Online AI · ready · AIV5-LIVE', 'ok');
+    setConnectionStatus('Free AI · ready · AIV5-LIVE', 'ok');
     setError('');
   };
 

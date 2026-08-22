@@ -19,23 +19,25 @@
     if (node) node.textContent = message || '';
   };
 
-  const sdkReady = () => Boolean(window.puter?.ai?.chat);
+  const freeProviderReady = () => {
+    try { return String(window.InterpreterNative?.getFreeAiApiKey?.() || '').trim().length >= 20; }
+    catch (_) { return false; }
+  };
 
-  // Deliberately synchronous: the first puter.ai.chat() invocation must still happen inside the
-  // original user action so Android WebView retains transient activation for first-use auth.
   const providerReady = () => {
     if (navigator.onLine === false) {
       setConnectionStatus('No internet connection · AIV5-LIVE', 'bad');
       setError('Interpreter AI needs an internet connection.');
       return false;
     }
-    if (!sdkReady()) {
-      setConnectionStatus('AI service unavailable · AIV5-LIVE', 'bad');
-      setError('Interpreter AI could not load its online service. Check your connection and try again.');
+    if (!freeProviderReady()) {
+      setConnectionStatus('Free AI setup needed · AIV5-LIVE', 'bad');
+      setError('Add a free Google AI Studio key once to use Interpreter AI without Puter payments.');
+      try { window.openFreeAiSetup?.(); } catch (_) {}
       return false;
     }
 
-    setConnectionStatus('Online AI · ready · AIV5-LIVE', 'ok');
+    setConnectionStatus('Free AI · ready · AIV5-LIVE', 'ok');
     setError('');
     return true;
   };
@@ -175,19 +177,8 @@
         return;
       }
 
-      // Voice recognition callbacks are not browser user gestures. Authenticate/warm the provider
-      // while the user is still inside the Interpreter Live button tap, then start the microphone.
-      try {
-        const signedIn = window.puter?.auth?.isSignedIn?.() === true;
-        if (!signedIn) {
-          const warmup = puter.ai.chat([
-            { role:'system', content:'Initialize an interpreter-training voice session.' },
-            { role:'user', content:'Reply only READY.' }
-          ], { model:'qwen/qwen3.6-27b', max_tokens:2, temperature:0 });
-          await warmup;
-        }
-      } catch (error) {
-        callStatus('Connection failed', error?.message || 'Interpreter AI authentication could not complete.');
+      if (typeof window.ensureConnected === 'function' && !(await window.ensureConnected())) {
+        callStatus('Connection failed', 'Complete Free AI setup and try again.');
         window.__voiceCallActive = false;
         return;
       }
@@ -233,6 +224,45 @@
         native?.startVoiceInput?.();
       }
     };
+
+    // Manual tap-to-interrupt fallback. The precise barge-in layer replaces the core
+    // interruption function when it is ready, while this keeps the central orb usable immediately.
+    if (!window.__manualLiveInterruptUiV1) {
+      window.__manualLiveInterruptUiV1 = true;
+      const orbButton = byId('voiceOrb');
+      if (orbButton) {
+        orbButton.setAttribute('role', 'button');
+        orbButton.setAttribute('tabindex', '0');
+        orbButton.setAttribute('aria-label', 'Interrupt Interpreter Live and speak');
+        orbButton.title = 'Tap to interrupt Interpreter Live';
+        orbButton.style.cursor = 'pointer';
+
+        const interruptFromOrb = () => {
+          if (!window.__voiceCallActive || window.__voiceCallMuted) return false;
+          if (typeof window.__interpreterManualBargeIn === 'function') {
+            return window.__interpreterManualBargeIn() === true;
+          }
+          stopVoice();
+          try { native?.stopVoiceInput?.(); } catch (_) {}
+          native?.setVoiceLanguage?.(byId('callVoiceLang')?.value || 'en-US');
+          callStatus('Listening…', 'Go ahead — I am listening.');
+          setOrbState('listening');
+          setTimeout(() => {
+            if (window.__voiceCallActive && !window.__voiceCallMuted) native?.startVoiceInput?.();
+          }, 30);
+          return true;
+        };
+
+        window.interruptInterpreterLive = interruptFromOrb;
+        orbButton.onclick = interruptFromOrb;
+        orbButton.onkeydown = event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            interruptFromOrb();
+          }
+        };
+      }
+    }
 
     window.__voiceInputStarted = () => {
       byId('voiceBtn')?.classList.add('listening');
@@ -320,9 +350,8 @@
       const system = `You are Interpreter AI, a fast professional coach for interpreters working especially in Arabic, English and French. Respond naturally and directly.\n\n${nativePracticeContext()}`;
       const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
 
-      // Invoke Puter NOW, before any await. This is the critical Android first-use auth fix.
-      const request = puter.ai.chat(conversation, {
-        model:'qwen/qwen3.6-27b',
+      const request = window.__interpreterAiRequest(conversation, {
+        model:'gemini-3.7-flash',
         max_tokens: fromVoice ? 320 : 650,
         temperature:0.24
       });
@@ -335,7 +364,7 @@
       saveHistory();
       hideTyping();
       addMessage('assistant', answer);
-      setConnectionStatus('Online AI · ready · AIV5-LIVE', 'ok');
+      setConnectionStatus('Free AI · ready · AIV5-LIVE', 'ok');
     } catch (error) {
       hideTyping();
       const message = error?.msg || error?.message || String(error);
@@ -365,11 +394,11 @@
 
     try {
       const prompt = `Mode: ${byId('mode')?.value || 'not specified'}\nDirection: ${byId('languages')?.value || 'not specified'}\nSource duration: ${byId('sourceSeconds')?.value || 'not provided'}\nTrainee duration: ${byId('traineeSeconds')?.value || 'not provided'}\n\nSOURCE:\n${source}\n\nTRAINEE:\n${trainee}\n\nEvaluate meaning transfer, omissions, additions, numbers, names, terminology, register, fluency and give three concrete drills.`;
-      const request = puter.ai.chat([
+      const request = window.__interpreterAiRequest([
         { role:'system', content:'You are a rigorous professional interpreter-performance evaluator. Do not invent evidence.' },
         { role:'user', content:prompt }
       ], {
-        model:'qwen/qwen3.6-27b',
+        model:'gemini-3.7-flash',
         max_tokens:1400,
         temperature:0.15
       });
@@ -390,7 +419,7 @@
         card.append(head, body);
         result.appendChild(card);
       }
-      setConnectionStatus('Online AI · ready · AIV5-LIVE', 'ok');
+      setConnectionStatus('Free AI · ready · AIV5-LIVE', 'ok');
     } catch (error) {
       const message = error?.msg || error?.message || String(error);
       if (result) result.innerHTML = '<div class="result-card error-box">Evaluation failed: ' + escapeHtml(message) + '</div>';
@@ -413,7 +442,7 @@
       setConnectionStatus('Loading AI service · AIV5-LIVE');
       return;
     }
-    setConnectionStatus('Online AI · ready · AIV5-LIVE', 'ok');
+    setConnectionStatus('Free AI · ready · AIV5-LIVE', 'ok');
     setError('');
   };
 

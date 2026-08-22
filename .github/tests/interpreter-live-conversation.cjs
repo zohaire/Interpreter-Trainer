@@ -200,7 +200,7 @@ async function testLowLatencyPolicyAndInterruptedContext() {
   };
 
   const context = {
-    console, setTimeout, clearTimeout, requestAnimationFrame, cancelAnimationFrame,
+    console, setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame, cancelAnimationFrame,
     document: {
       querySelectorAll(selector) { return selector === '.message.user .bubble' ? visibleBubbles : []; },
       getElementById(id) { return domNodes[id] || null; }
@@ -212,19 +212,12 @@ async function testLowLatencyPolicyAndInterruptedContext() {
       __voiceCallActive: true,
       __voiceCallMuted: false,
       busy: false,
-      InterpreterLiveNative: {
-        startCloudVoiceInput() { return false; },
-        stopCloudVoiceInput() {}
-      },
+      InterpreterLiveNative: {},
       endVoiceCall() {},
-      puter: {
-        ai: {
-          async chat(request, options) {
-            capturedRequest = request;
-            capturedOptions = options;
-            return { ok: true };
-          }
-        }
+      async __interpreterAiRequest(request, options) {
+        capturedRequest = request;
+        capturedOptions = options;
+        return { message: { content: 'ok' } };
       }
     },
     Number, Math, Array, String, Date, Promise
@@ -233,6 +226,8 @@ async function testLowLatencyPolicyAndInterruptedContext() {
   context.window.document = context.document;
   context.window.setTimeout = setTimeout;
   context.window.clearTimeout = clearTimeout;
+  context.window.setInterval = setInterval;
+  context.window.clearInterval = clearInterval;
   context.window.requestAnimationFrame = requestAnimationFrame;
   context.window.cancelAnimationFrame = cancelAnimationFrame;
   vm.createContext(context);
@@ -245,12 +240,11 @@ async function testLowLatencyPolicyAndInterruptedContext() {
     { role: 'system', content: 'You are Interpreter AI.' },
     { role: 'user', content: newAddition }
   ];
-  await context.window.puter.ai.chat(messages, { stream: true, max_tokens: 260, temperature: 0.22 });
+  await context.window.__interpreterAiRequest(messages, { max_tokens: 260 });
 
   assert.ok(capturedOptions.max_tokens <= 160, 'Interpreter Live response budget was not shortened.');
-  assert.ok(capturedOptions.temperature <= 0.20, 'Low-latency temperature was not applied.');
-  assert.strictEqual(capturedOptions.stream, true, 'Streaming was disabled.');
   assert.ok(capturedRequest[0].content.includes('INTERPRETER LIVE LOW-LATENCY POLICY'));
+  assert.ok(!source.includes('puter.ai'), 'Low-latency layer reintroduced Puter AI.');
 
   const userTurns = capturedRequest.filter(item => item.role === 'user').map(item => item.content);
   assert.deepStrictEqual(userTurns, [oldQuestion, newAddition], 'Interrupted question context was not preserved.');
@@ -261,7 +255,7 @@ async function testLowLatencyPolicyAndInterruptedContext() {
   await testNativeFullDuplexBargeIn();
   await testRecognizerFallback();
   await testLowLatencyPolicyAndInterruptedContext();
-  console.log('Interpreter Live direct-native routing, interruption, fallback, context and latency tests passed.');
+  console.log('Interpreter Live direct-native routing, interruption, fallback, context and free-provider latency tests passed.');
 })().catch(error => {
   console.error(error);
   process.exit(1);

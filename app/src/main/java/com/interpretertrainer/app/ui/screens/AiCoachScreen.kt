@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -20,6 +21,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -36,6 +38,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -59,8 +66,25 @@ import java.util.Locale
 fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
     val sessions by sessionViewModel.sessions.collectAsState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val bridgeHolder = remember { mutableStateOf<PracticeContextBridge?>(null) }
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
+    val fileCallbackRef = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        val callback = fileCallbackRef.value
+        if (callback == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val prepared = withContext(Dispatchers.IO) {
+                LocalDocumentExtractor.prepare(context.applicationContext, uris)
+            }
+            bridgeHolder.value?.setPreparedAttachments(prepared)
+            callback.onReceiveValue(uris.toTypedArray())
+            fileCallbackRef.value = null
+        }
+    }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -81,6 +105,8 @@ fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
 
     DisposableEffect(Unit) {
         onDispose {
+            fileCallbackRef.value?.onReceiveValue(null)
+            fileCallbackRef.value = null
             bridge.dispose()
             webViewRef.value?.let { webView ->
                 runCatching { webView.stopLoading() }
@@ -98,7 +124,12 @@ fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
                 .fillMaxSize()
                 .padding(padding),
             factory = { webContext ->
-                createCoachWebView(webContext, bridge).also { webViewRef.value = it }
+                createCoachWebView(webContext, bridge) { callback ->
+                    fileCallbackRef.value?.onReceiveValue(null)
+                    fileCallbackRef.value = callback
+                    filePickerLauncher.launch(arrayOf("*/*"))
+                    true
+                }.also { webViewRef.value = it }
             },
             update = { webView ->
                 CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
@@ -113,6 +144,7 @@ private class PracticeContextBridge(
 ) : RecognitionListener, TextToSpeech.OnInitListener {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val microphoneOwnerId = "ai-voice-${System.identityHashCode(this)}"
+    private val aiSettings = context.getSharedPreferences("interpreter_ai_settings", Context.MODE_PRIVATE)
 
     private var webView: WebView? = null
     private var recognizer: SpeechRecognizer? = null
@@ -128,6 +160,8 @@ private class PracticeContextBridge(
 
     private var pendingVoiceStart = false
 
+    private val preparedAttachments = ConcurrentHashMap<String, PreparedAttachment>()
+
     @Volatile
     var contextValue: String = buildPracticeContext(emptyList())
 
@@ -141,6 +175,47 @@ private class PracticeContextBridge(
 
     @JavascriptInterface
     fun getPracticeContext(): String = contextValue
+
+    @JavascriptInterface
+    fun getFreeAiApiKey(): String = aiSettings.getString("gemini_api_key", "").orEmpty()
+
+    @JavascriptInterface
+    fun setFreeAiApiKey(value: String): Boolean {
+        val clean = value.trim()
+        if (clean.length !in 20..256) return false
+        aiSettings.edit().putString("gemini_api_key", clean).apply()
+        return true
+    }
+
+    @JavascriptInterface
+    fun clearFreeAiApiKey(): Boolean {
+        aiSettings.edit().remove("gemini_api_key").apply()
+        return true
+    }
+
+    @JavascriptInterface
+    fun openFreeAiKeyPage(): Boolean = runCatching {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+
+    fun setPreparedAttachments(items: List<PreparedAttachment>) {
+        preparedAttachments.clear()
+        items.forEach { preparedAttachments[it.name] = it }
+    }
+
+    @JavascriptInterface
+    fun getPreparedAttachment(name: String): String {
+        val item = preparedAttachments[name] ?: return ""
+        return JSONObject().apply {
+            put("name", item.name)
+            put("kind", item.kind)
+            put("text", item.text ?: JSONObject.NULL)
+            put("error", item.error ?: JSONObject.NULL)
+        }.toString()
+    }
 
     @JavascriptInterface
     fun sendToPractice(mode: String, text: String): Boolean = AiPracticeBridge.sendToMode(mode, text)
@@ -397,6 +472,7 @@ private class PracticeContextBridge(
             textToSpeech?.shutdown()
             textToSpeech = null
             ttsReady = false
+            preparedAttachments.clear()
             webView = null
         }
     }
@@ -409,7 +485,11 @@ private class PracticeContextBridge(
 }
 
 @SuppressLint("SetJavaScriptEnabled")
-private fun createCoachWebView(context: Context, bridge: PracticeContextBridge): WebView {
+private fun createCoachWebView(
+    context: Context,
+    bridge: PracticeContextBridge,
+    onFileChooser: (ValueCallback<Array<Uri>>) -> Boolean
+): WebView {
     val html = context.assets.open("interpreter_coach.html")
         .bufferedReader(Charsets.UTF_8)
         .use { it.readText() }
@@ -428,7 +508,7 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
             view?.evaluateJavascript(coachEnhancementScript(), null)
         }
     }
-    webView.webChromeClient = CoachChromeClient(context)
+    webView.webChromeClient = CoachChromeClient(context, onFileChooser)
 
     CookieManager.getInstance().apply {
         setAcceptCookie(true)
@@ -822,31 +902,13 @@ private fun coachEnhancementScript(): String = """
     try {
       const system = `You are Interpreter AI, a fast professional coach for interpreters. Work especially well across Arabic, English and French. Help with simultaneous and consecutive interpreting, shadowing, transcription, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. In voice conversations, sound natural, concise and conversational rather than like a written report. Respond directly in the user's language. Never invent scores, transcripts, history or app facts. The authoritative app/context information below is reliable.\n\n${nativePracticeContext()}`;
       const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
-      const stream = await puter.ai.chat(conversation, {
-        model:'qwen/qwen3.6-27b',
-        stream:true,
-        max_tokens:fromVoice ? 420 : 650,
-        temperature:0.24
+      const result = await window.__interpreterAiRequest(conversation, {
+        model:'gemini-3.7-flash',
+        max_tokens:fromVoice ? 420 : 650
       });
 
       hideTyping();
-      streamRow = messageElement('assistant', '');
-      streamRow.dataset.streaming = '1';
-      document.getElementById('messages').appendChild(streamRow);
-      const bubble = streamRow.querySelector('.bubble');
-
-      for await (const part of stream) {
-        if (part?.type === 'error') throw new Error(part?.error?.message || part?.message || 'Streaming request failed.');
-        const chunk = typeof part === 'string'
-          ? part
-          : (typeof part?.text === 'string'
-              ? part.text
-              : (typeof part?.delta?.content === 'string' ? part.delta.content : ''));
-        if (!chunk) continue;
-        answer += chunk;
-        if (bubble) bubble.textContent = answer;
-        requestAnimationFrame(scrollToBottom);
-      }
+      answer = responseText(result);
 
       answer = answer.trim();
       if (!answer) throw new Error('The AI returned an empty response.');
@@ -857,7 +919,7 @@ private fun coachEnhancementScript(): String = """
       history = history.slice(-16);
       saveHistory();
       addMessage('assistant', answer);
-      setStatus('Online · ready', 'ok');
+      setStatus('Free AI · ready', 'ok');
 
       if (window.__voiceCallActive) {
         callStatus('Interpreter AI is speaking', answer);
@@ -916,7 +978,19 @@ private fun configureCoachWebView(webView: WebView) {
     }
 }
 
-private class CoachChromeClient(private val context: Context) : WebChromeClient() {
+private class CoachChromeClient(
+    private val context: Context,
+    private val onFileChooser: (ValueCallback<Array<Uri>>) -> Boolean
+) : WebChromeClient() {
+    override fun onShowFileChooser(
+        webView: WebView?,
+        filePathCallback: ValueCallback<Array<Uri>>?,
+        fileChooserParams: WebChromeClient.FileChooserParams?
+    ): Boolean {
+        val callback = filePathCallback ?: return false
+        return onFileChooser(callback)
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreateWindow(
         view: WebView?,
@@ -990,6 +1064,16 @@ private fun buildPracticeContext(sessions: List<PracticeSessionEntity>): String 
     appendLine("Interpreter Trainer was created and developed by Zouhair Elachaqi.")
     appendLine("Zouhair Elachaqi is the creator of this app, not the AI model or Puter service.")
     appendLine("If the user asks who created, developed, designed, owns, or made the app, answer with Zouhair Elachaqi and do not claim that the creator is unknown.")
+    appendLine()
+
+    appendLine("AUTHORITATIVE CREATOR ACADEMIC PROFILE:")
+    appendLine("When someone asks about Zouhair Elachaqi's university career, education, or academic background, give several relevant facts from this profile rather than only repeating his name.")
+    appendLine("Zouhair Elachaqi studied at Université Mohammed V de Rabat, Faculty of Education Sciences / Faculty of Educational Sciences.")
+    appendLine("He completed a Licence en Éducation (Bachelor's Degree in Education), Secondary Education - English.")
+    appendLine("Present his academic background first through English Studies and linguistics: linguistics, grammar, English language study, and English language and culture were important components of his university training.")
+    appendLine("His studies also included educational sciences and professional teacher preparation, including didactics, docimology and assessment, classroom management, and inclusive education.")
+    appendLine("When summarizing his university profile, emphasize linguistics, English Studies, language knowledge, and multilingual communication before discussing education or didactics.")
+    appendLine("Do not mention a research topic, research findings, university supervisor, graduation year, grades, or other details that are not included in this authoritative profile.")
     appendLine()
 
     if (sessions.isEmpty()) {

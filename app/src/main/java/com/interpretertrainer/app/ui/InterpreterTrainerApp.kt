@@ -17,6 +17,7 @@ object Routes {
     const val CONSECUTIVE = "consecutive"
     const val TRANSCRIPTION = "transcription"
     const val AI_COACH = "ai-coach"
+    const val SIGN_LANGUAGE = "sign-language"
     const val HISTORY = "history"
     const val HISTORY_DETAIL = "history/{id}"
 }
@@ -65,16 +66,19 @@ fun InterpreterTrainerApp(
             )
         }
         composable(Routes.AI_COACH) {
-            // Use the coach-owned WebView directly. The previous responsive wrapper reloaded the
-            // page and patched it after composition, which could leave a perfectly rendered but
-            // non-interactive surface on some Android/WebView combinations. AiCoachScreen owns
-            // the real AndroidView/WebView and its native microphone/TTS bridge from creation.
             AiCoachScreen(
                 onBack = navController::popBackStack,
                 sessionViewModel = sessionViewModel
             )
         }
-        composable(Routes.HISTORY) { HistoryScreen(onBack = navController::popBackStack, sessionViewModel) { id -> navController.navigate("history/$id") } }
+        composable(Routes.SIGN_LANGUAGE) {
+            SignLanguageScreen(onBack = navController::popBackStack)
+        }
+        composable(Routes.HISTORY) {
+            HistoryScreen(onBack = navController::popBackStack, sessionViewModel) { id ->
+                navController.navigate("history/$id")
+            }
+        }
         composable(
             Routes.HISTORY_DETAIL,
             arguments = listOf(navArgument("id") { type = NavType.LongType })

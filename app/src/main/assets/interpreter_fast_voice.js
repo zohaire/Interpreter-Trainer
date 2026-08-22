@@ -299,7 +299,7 @@
     resizeComposer();
     updateSendState();
 
-    if (ensureConnected() === false) {
+    if (!(await ensureConnected())) {
       if (window.__voiceCallActive) setCallStatus('Connection failed', 'Unable to reach Interpreter AI.');
       return;
     }
@@ -325,32 +325,14 @@
     try {
       const system = 'You are Interpreter AI, a fast professional coach for interpreters. Work especially well across Arabic, English and French. Help with simultaneous and consecutive interpreting, shadowing, transcription, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. In voice conversations, answer naturally and directly in the user\'s language. Unless the user explicitly asks for detail, keep a voice reply to 1–2 short sentences and put the direct answer first. Never invent scores, transcripts, history or app facts. The authoritative app/context information below is reliable.\n\n' + nativePracticeContext();
       const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
-      const stream = await puter.ai.chat(conversation, {
-        model:'qwen/qwen3.6-27b', stream:true, max_tokens:voiceResponse ? 180 : 650, temperature:0.20
+      const result = await window.__interpreterAiRequest(conversation, {
+        model:'gemini-3.7-flash', max_tokens:voiceResponse ? 180 : 650
       });
 
       if (responseId !== state.responseId) throw { __interrupted:true };
       hideTyping();
-      streamRow = messageElement('assistant', '');
-      streamRow.dataset.streaming = '1';
-      document.getElementById('messages').appendChild(streamRow);
-      const bubble = streamRow.querySelector('.bubble');
-
-      for await (const part of stream) {
-        if (responseId !== state.responseId) {
-          try { await stream.return?.(); } catch (_) {}
-          throw { __interrupted:true };
-        }
-        if (part?.type === 'error') throw new Error(part?.error?.message || part?.message || 'Streaming request failed.');
-        const chunk = typeof part === 'string' ? part :
-          (typeof part?.text === 'string' ? part.text :
-            (typeof part?.delta?.content === 'string' ? part.delta.content : ''));
-        if (!chunk) continue;
-        answer += chunk;
-        state.streamAnswer = answer;
-        scheduleStreamPaint(bubble, answer);
-        if (voiceResponse) queueReadySpeech(false);
-      }
+      answer = responseText(result);
+      state.streamAnswer = answer;
 
       if (responseId !== state.responseId) throw { __interrupted:true };
       answer = answer.trim();
@@ -366,7 +348,7 @@
       history = history.slice(-16);
       saveHistory();
       addMessage('assistant', answer);
-      setStatus('Online AI · ready · LIVE5', 'ok');
+      setStatus('Free AI · ready · LIVE5', 'ok');
       window.__voiceAutoSpeak = false;
       window.__voiceOneShot = false;
       pumpSpeech();

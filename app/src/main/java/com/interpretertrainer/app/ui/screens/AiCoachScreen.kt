@@ -38,6 +38,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -61,6 +66,7 @@ import java.util.Locale
 fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
     val sessions by sessionViewModel.sessions.collectAsState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val bridgeHolder = remember { mutableStateOf<PracticeContextBridge?>(null) }
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
     val fileCallbackRef = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
@@ -68,8 +74,16 @@ fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
     val filePickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
-        fileCallbackRef.value?.onReceiveValue(uris.toTypedArray())
-        fileCallbackRef.value = null
+        val callback = fileCallbackRef.value
+        if (callback == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val prepared = withContext(Dispatchers.IO) {
+                LocalDocumentExtractor.prepare(context.applicationContext, uris)
+            }
+            bridgeHolder.value?.setPreparedAttachments(prepared)
+            callback.onReceiveValue(uris.toTypedArray())
+            fileCallbackRef.value = null
+        }
     }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
@@ -145,6 +159,8 @@ private class PracticeContextBridge(
 
     private var pendingVoiceStart = false
 
+    private val preparedAttachments = ConcurrentHashMap<String, PreparedAttachment>()
+
     @Volatile
     var contextValue: String = buildPracticeContext(emptyList())
 
@@ -158,6 +174,22 @@ private class PracticeContextBridge(
 
     @JavascriptInterface
     fun getPracticeContext(): String = contextValue
+
+    fun setPreparedAttachments(items: List<PreparedAttachment>) {
+        preparedAttachments.clear()
+        items.forEach { preparedAttachments[it.name] = it }
+    }
+
+    @JavascriptInterface
+    fun getPreparedAttachment(name: String): String {
+        val item = preparedAttachments[name] ?: return ""
+        return JSONObject().apply {
+            put("name", item.name)
+            put("kind", item.kind)
+            put("text", item.text ?: JSONObject.NULL)
+            put("error", item.error ?: JSONObject.NULL)
+        }.toString()
+    }
 
     @JavascriptInterface
     fun sendToPractice(mode: String, text: String): Boolean = AiPracticeBridge.sendToMode(mode, text)
@@ -414,6 +446,7 @@ private class PracticeContextBridge(
             textToSpeech?.shutdown()
             textToSpeech = null
             ttsReady = false
+            preparedAttachments.clear()
             webView = null
         }
     }

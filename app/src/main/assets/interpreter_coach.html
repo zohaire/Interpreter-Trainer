@@ -52,6 +52,11 @@
   let pending = [];
   let uploading = false;
   let armNextChat = false;
+  const MAX_LOCAL_TEXT = 260000;
+  const MAX_TOTAL_EXTRACTED = 300000;
+  const TEXT_EXTENSIONS = new Set(['txt','md','markdown','csv','tsv','json','jsonl','xml','html','htm','css','js','mjs','cjs','ts','tsx','jsx','kt','kts','java','py','rb','php','go','rs','c','cc','cpp','h','hpp','sh','bash','zsh','sql','yaml','yml','toml','ini','cfg','log','srt','vtt','rtf']);
+  const AUDIO_EXTENSIONS = new Set(['mp3','wav','m4a','aac','ogg','oga','flac','opus','webm','amr','3gp']);
+  const extOf = name => String(name || '').toLowerCase().split('.').pop() || '';
 
   const style = document.createElement('style');
   style.textContent = `.attachment-btn{color:var(--accent)!important;font-size:22px;font-weight:500}.attachment-strip{width:min(780px,100%);margin:0 auto 7px;display:none;gap:6px;flex-wrap:wrap}.attachment-strip.show{display:flex}.attachment-chip{max-width:48%;padding:6px 9px;border:1px solid var(--border);border-radius:999px;background:var(--surface-soft);color:var(--muted);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.attachment-chip.ready{color:var(--ok)}.attachment-chip.bad{color:var(--danger)}`;
@@ -83,6 +88,15 @@
     if (box) box.textContent = message;
   };
 
+  const classifyFile = file => {
+    const mime = String(file?.type || '').toLowerCase();
+    const ext = extOf(file?.name);
+    if (mime.startsWith('image/') || mime.startsWith('video/')) return 'vision';
+    if (mime.startsWith('audio/') || AUDIO_EXTENSIONS.has(ext)) return 'audio';
+    if (mime.startsWith('text/') || TEXT_EXTENSIONS.has(ext)) return 'text';
+    return 'document';
+  };
+
   const redraw = () => {
     strip.innerHTML = '';
     strip.classList.toggle('show', pending.length > 0);
@@ -90,154 +104,121 @@
       const chip = document.createElement('div');
       chip.className = 'attachment-chip ' + (item.status === 'ready' ? 'ready' : item.status === 'error' ? 'bad' : '');
       chip.textContent = `${item.status === 'uploading' ? '↑ ' : item.status === 'ready' ? '✓ ' : item.status === 'error' ? '! ' : ''}${item.name}`;
-      chip.title = item.status === 'error' ? (item.error || 'Upload failed') : item.name;
+      chip.title = item.status === 'error' ? (item.error || 'Attachment failed') : item.name;
       strip.appendChild(chip);
     });
   };
 
-  const DOC_READER_MODEL='claude-sonnet-4-6';
-  const MAX_LOCAL_TEXT=100000;
-  const MAX_TOTAL_EXTRACTED=260000;
-  const TEXT_EXTENSIONS=new Set(['txt','md','markdown','csv','tsv','json','jsonl','xml','html','htm','css','js','mjs','cjs','ts','tsx','jsx','kt','kts','java','py','rb','php','go','rs','c','cc','cpp','h','hpp','sh','bash','zsh','sql','yaml','yml','toml','ini','cfg','log','srt','vtt']);
-  const AUDIO_EXTENSIONS=new Set(['mp3','wav','m4a','aac','ogg','oga','flac','opus','webm','amr','3gp']);
-  const extOf=name=>String(name||'').toLowerCase().split('.').pop()||'';
-  const classifyFile=file=>{
-    const mime=String(file?.type||'').toLowerCase(),ext=extOf(file?.name);
-    if(mime.startsWith('image/')||mime.startsWith('video/'))return'vision';
-    if(mime.startsWith('audio/')||AUDIO_EXTENSIONS.has(ext))return'audio';
-    if(mime.startsWith('text/')||TEXT_EXTENSIONS.has(ext))return'text';
-    return'document';
+  const nativePrepared = name => {
+    try {
+      const raw = window.InterpreterNative?.getPreparedAttachment?.(name);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (_) { return null; }
   };
-  const responseText=result=>{
-    if(typeof result==='string')return result.trim();
-    if(typeof result?.text==='string')return result.text.trim();
-    const content=result?.message?.content;
-    if(typeof content==='string')return content.trim();
-    if(Array.isArray(content))return content.map(part=>typeof part==='string'?part:(part?.text||'')).join('').trim();
-    return'';
-  };
-  const speechText=result=>typeof result==='string'?result.trim():String(result?.text||result?.transcript||'').trim();
-  const safeFileName=name=>String(name||'file').replace(/[^a-zA-Z0-9._-]+/g,'_').slice(-120)||'file';
 
-  const writeOneFile=async(file,index)=>{
-    if(window.puter?.fs?.write){
-      const target=`InterpreterTrainerUploads/${Date.now()}-${index}-${safeFileName(file.name)}`;
-      const item=await puter.fs.write(target,file,{createMissingParents:true,dedupeName:true});
-      if(!item?.path)throw new Error('Puter did not return a stored file path.');
+  const safeFileName = name => String(name || 'file').replace(/[^a-zA-Z0-9._-]+/g,'_').slice(-120) || 'file';
+  const writeRemoteMedia = async (file, index) => {
+    if (window.puter?.fs?.write) {
+      const target = `InterpreterTrainerUploads/${Date.now()}-${index}-${safeFileName(file.name)}`;
+      const item = await puter.fs.write(target, file, {createMissingParents:true,dedupeName:true});
+      if (!item?.path) throw new Error('Puter did not return a stored file path.');
       return item.path;
     }
-    if(window.puter?.fs?.upload){
-      const result=await puter.fs.upload([file],'./InterpreterTrainerUploads',{dedupeName:true});
-      const item=Array.isArray(result)?result[0]:result;
-      if(!item?.path)throw new Error('Puter did not return a stored file path.');
+    if (window.puter?.fs?.upload) {
+      const result = await puter.fs.upload([file], './InterpreterTrainerUploads', {dedupeName:true});
+      const item = Array.isArray(result) ? result[0] : result;
+      if (!item?.path) throw new Error('Puter did not return a stored file path.');
       return item.path;
     }
-    throw new Error('File storage service is unavailable.');
+    throw new Error('Media upload service is unavailable.');
   };
 
   input.onchange = async () => {
     const files = [...(input.files || [])];
     input.value = '';
     if (!files.length) return;
-    if (!window.puter?.fs) {
-      error('File upload service is not available. Check the internet connection and try again.');
-      return;
-    }
 
-    const batch = files.map(file => ({
-      name:file.name,
-      mime:file.type||'',
-      kind:classifyFile(file),
-      status:'uploading',
-      path:null,
-      localText:null,
-      error:null
-    }));
+    const batch = files.map(file => ({name:file.name,mime:file.type||'',kind:classifyFile(file),status:'uploading',path:null,localText:null,error:null}));
     pending.push(...batch);
     uploading = true;
     redraw();
     error('');
 
-    try {
-      await Promise.all(batch.map(async(item,i)=>{
-        if(item.kind==='text'){
-          try{item.localText=(await files[i].text()).slice(0,MAX_LOCAL_TEXT)}catch(_){item.localText=null}
+    await Promise.all(batch.map(async (item, index) => {
+      try {
+        const file = files[index];
+        if (item.kind === 'text') {
+          item.localText = (await file.text()).slice(0, MAX_LOCAL_TEXT);
+        } else if (item.kind === 'document') {
+          const prepared = nativePrepared(item.name);
+          if (prepared?.text) item.localText = String(prepared.text).slice(0, MAX_LOCAL_TEXT);
+          else throw new Error(prepared?.error || 'This document could not be read locally.');
+        } else {
+          item.path = await writeRemoteMedia(file, index);
         }
-        item.path=await writeOneFile(files[i],i);
-        item.status='ready';
-      }));
-    } catch (e) {
-      batch.filter(item=>item.status!=='ready').forEach(item => {
+        item.status = 'ready';
+      } catch (e) {
         item.status = 'error';
         item.error = e?.message || String(e);
-      });
-      error('One or more files could not be prepared for AI reading. Choose the failed files again.');
-    } finally {
-      uploading = false;
-      redraw();
-    }
+      }
+    }));
+
+    uploading = false;
+    redraw();
+    const failed = batch.filter(item => item.status === 'error');
+    if (failed.length) error(failed.map(item => `${item.name}: ${item.error}`).join(' · '));
   };
 
   const blockWhileUploading = event => {
     if (!uploading) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    error('Files are still uploading. Send after the attachment chips show ✓.');
+    error('Files are still being prepared. Send after the attachment chips show ✓.');
   };
   sendButton.addEventListener('click', blockWhileUploading, true);
   chatInput.addEventListener('keydown', event => {
     if (uploading && event.key === 'Enter' && !event.shiftKey) blockWhileUploading(event);
   }, true);
 
+  const readyItems = () => pending.filter(item => item.status === 'ready' && (item.localText || item.path));
+
   const installChatWrapper = () => {
     const current = window.sendChat;
     if (typeof current !== 'function' || current.__attachmentWrapper) return;
     const wrapped = function(...args) {
-      const ready = pending.filter(item => item.status === 'ready' && item.path);
-      if (ready.length) armNextChat = true;
+      if (readyItems().length) armNextChat = true;
       return current.apply(this, args);
     };
     wrapped.__attachmentWrapper = true;
     window.sendChat = wrapped;
   };
 
-  const extractReadableContext=async(item,original)=>{
-    if(item.kind==='text'&&item.localText){
-      return `FILE: ${item.name}
-TYPE: text
-CONTENT:
-${item.localText}`;
-    }
+  const responseText = result => {
+    if (typeof result === 'string') return result.trim();
+    if (typeof result?.text === 'string') return result.text.trim();
+    const content = result?.message?.content;
+    if (typeof content === 'string') return content.trim();
+    if (Array.isArray(content)) return content.map(part => typeof part === 'string' ? part : (part?.text || '')).join('').trim();
+    return '';
+  };
 
-    if(item.kind==='audio'&&window.puter?.ai?.speech2txt){
-      try{
-        const transcript=await puter.ai.speech2txt(item.path,{model:'gpt-4o-mini-transcribe',response_format:'text'});
-        const text=speechText(transcript);
-        if(text)return `FILE: ${item.name}
-TYPE: audio transcript
-CONTENT:
-${text}`;
-      }catch(e){item.readError='Audio transcription failed: '+(e?.message||e)}
-    }
+  const speechText = result => typeof result === 'string' ? result.trim() : String(result?.text || result?.transcript || '').trim();
 
-    if(item.kind==='document'){
-      try{
-        const result=await original([
-          {role:'user',content:[
-            {type:'file',puter_path:item.path},
-            {type:'text',text:'Extract the readable content of this file for another AI. Preserve headings, paragraphs, names, dates, numbers, tables and lists as plain text. Do not answer questions and do not invent content. If the file is very long, retain as much substantive content as possible while preserving its structure.'}
-          ]}
-        ],{model:DOC_READER_MODEL,max_tokens:6500,temperature:0});
-        const extracted=responseText(result);
-        if(extracted)return `FILE: ${item.name}
-TYPE: extracted document
-CONTENT:
-${extracted}`;
-        item.readError='The document reader returned no readable text.';
-      }catch(e){item.readError='Document reading failed: '+(e?.message||e)}
+  const extractReadableContext = async item => {
+    if ((item.kind === 'text' || item.kind === 'document') && item.localText) {
+      return `FILE: ${item.name}\nTYPE: ${item.kind}\nCONTENT:\n${item.localText}`;
     }
-
-    return'';
+    if (item.kind === 'audio' && item.path && window.puter?.ai?.speech2txt) {
+      try {
+        const transcript = await puter.ai.speech2txt(item.path, {model:'gpt-4o-mini-transcribe',response_format:'text'});
+        const text = speechText(transcript);
+        if (text) return `FILE: ${item.name}\nTYPE: audio transcript\nCONTENT:\n${text}`;
+      } catch (e) {
+        item.readError = 'Audio transcription needs available AI usage: ' + (e?.message || e);
+      }
+    }
+    return '';
   };
 
   const installPuterWrapper = () => {
@@ -247,7 +228,7 @@ ${extracted}`;
     const wrapped = async function(messages, options) {
       if (!armNextChat) return original(messages, options);
       armNextChat = false;
-      const ready = pending.filter(item => item.status === 'ready' && item.path);
+      const ready = readyItems();
       if (!ready.length || !Array.isArray(messages)) return original(messages, options);
 
       const cloned = messages.map(message => ({...message}));
@@ -257,41 +238,30 @@ ${extracted}`;
       }
       if (index < 0) return original(messages, options);
 
-      const contexts=(await Promise.all(ready.map(item=>extractReadableContext(item,original))))
-        .filter(Boolean);
-      let used=0;
-      const boundedContexts=[];
-      for(const context of contexts){
-        if(used>=MAX_TOTAL_EXTRACTED)break;
-        const slice=context.slice(0,MAX_TOTAL_EXTRACTED-used);
-        boundedContexts.push(slice);
-        used+=slice.length;
+      const contexts = (await Promise.all(ready.map(extractReadableContext))).filter(Boolean);
+      let used = 0;
+      const bounded = [];
+      for (const context of contexts) {
+        if (used >= MAX_TOTAL_EXTRACTED) break;
+        const slice = context.slice(0, MAX_TOTAL_EXTRACTED - used);
+        bounded.push(slice);
+        used += slice.length;
       }
 
       const originalContent = cloned[index].content;
-      const originalParts = Array.isArray(originalContent)
-        ? [...originalContent]
-        : [{ type:'text', text:String(originalContent ?? '') }];
+      const originalParts = Array.isArray(originalContent) ? [...originalContent] : [{type:'text',text:String(originalContent ?? '')}];
       const content = [];
-
-      // Qwen3.8 Max natively receives image/video files. Text, audio and general documents are
-      // converted to text first so unsupported binary formats cannot break or be silently ignored.
-      ready.filter(item=>item.kind==='vision').forEach(item => content.push({ type:'file', puter_path:item.path }));
-      if(boundedContexts.length){
-        content.push({
-          type:'text',
-          text:'The following attachment content was extracted or transcribed for reliable reading. Treat it as source material from the attached files:'+String.fromCharCode(10,10)+boundedContexts.join(String.fromCharCode(10,10)+'--- NEXT FILE ---'+String.fromCharCode(10,10))
-        });
+      ready.filter(item => item.kind === 'vision' && item.path).forEach(item => content.push({type:'file',puter_path:item.path}));
+      if (bounded.length) {
+        content.push({type:'text',text:'Read and use the following attachment content as source material. Do not claim you cannot access it:\n\n' + bounded.join('\n\n--- NEXT FILE ---\n\n')});
       }
       content.push(...originalParts);
       cloned[index] = {...cloned[index], content};
 
-      const unread=ready.filter(item=>item.readError);
-      if(unread.length){
-        error('Some attachment formats could not be converted into readable text: '+unread.map(item=>item.name).join(', '));
-      }
+      const unread = ready.filter(item => item.readError);
+      if (unread.length) error(unread.map(item => `${item.name}: ${item.readError}`).join(' · '));
 
-      pending = pending.filter(item => item.status !== 'ready');
+      pending = pending.filter(item => !ready.includes(item));
       redraw();
       return original(cloned, options);
     };

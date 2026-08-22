@@ -1,6 +1,9 @@
 name: Apply attachment reading fix
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - feature/qwen38-signbridge
@@ -10,6 +13,7 @@ permissions:
 
 jobs:
   apply-test-commit:
+    if: github.event_name == 'push' || github.head_ref == 'feature/qwen38-signbridge'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

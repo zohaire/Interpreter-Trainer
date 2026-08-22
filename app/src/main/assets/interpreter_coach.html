@@ -60,9 +60,7 @@
   async function geminiChat(messages,options={}){
     const key=freeAiKey();
     if(!key){openFreeAiSetup();throw new Error('Free AI setup is required. Add a free Google AI Studio key once to continue without Puter payments.')}
-    const system=messages.filter(m=>m?.role==='system').map(m=>plainTextContent(m.content)).filter(Boolean).join('
-
-');
+    const system=messages.filter(m=>m?.role==='system').map(m=>plainTextContent(m.content)).filter(Boolean).join('\n\n');
     const contents=[];
     for(const message of messages){if(!message||message.role==='system')continue;const parts=geminiParts(message.content);if(!parts.length)continue;contents.push({role:message.role==='assistant'?'model':'user',parts})}
     const body={contents,generationConfig:{maxOutputTokens:Math.min(Number(options.max_tokens)||900,2200)}};

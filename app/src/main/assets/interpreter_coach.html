@@ -21,14 +21,21 @@
 <body>
 <div class="app">
   <header class="topline"><div class="identity"><div class="ai-mark">IT</div><div><div class="identity-title">Interpreter AI</div><div class="status-line"><span id="statusDot" class="status-dot"></span><span id="statusText">Checking connection…</span></div></div></div><button class="icon-btn" type="button" aria-label="New chat" title="New chat" onclick="newChat()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg></button></header>
-  <section id="chatPane" class="pane active"><div id="chatScroll" class="chat-scroll"><div class="chat-inner"><div id="welcome" class="welcome"><div class="welcome-mark"><svg class="wave-glyph" viewBox="0 0 48 48" fill="none" stroke="white" stroke-width="3.2" stroke-linecap="round"><path d="M8 26v-4"/><path d="M15 32V16"/><path d="M22 37V11"/><path d="M29 32V16"/><path d="M36 27v-6"/><path d="M42 25v-2"/></svg></div><h1>Train with a voice built for interpreters.</h1><p>Ask, speak, generate drills, move material into practice modes, and review your performance in Arabic, English, or French.</p><div class="suggestions"><button class="suggestion" onclick="useSuggestion('Give me a 10-minute consecutive interpreting drill for today.')">10-minute drill</button><button class="suggestion" onclick="useSuggestion('Give me a simultaneous interpreting passage on diplomacy.')">Simultaneous passage</button><button class="suggestion" onclick="useSuggestion('Give me a shadowing exercise in French.')">French shadowing</button></div></div><div id="messages" class="messages" aria-live="polite"></div><div id="typingHost"></div></div></div><div id="chatError" class="chat-error" role="alert"></div><div class="composer-shell"><div class="composer"><textarea id="chatInput" rows="1" maxlength="4000" placeholder="Message Interpreter AI" aria-label="Message Interpreter AI"></textarea><button id="sendBtn" class="send-btn" type="button" aria-label="Send message" onclick="sendChat()" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button></div><div class="composer-meta">Free AI · Gemini 3.7 Flash · local documents + multimodal media</div></div></section>
+  <section id="chatPane" class="pane active"><div id="chatScroll" class="chat-scroll"><div class="chat-inner"><div id="welcome" class="welcome"><div class="welcome-mark"><svg class="wave-glyph" viewBox="0 0 48 48" fill="none" stroke="white" stroke-width="3.2" stroke-linecap="round"><path d="M8 26v-4"/><path d="M15 32V16"/><path d="M22 37V11"/><path d="M29 32V16"/><path d="M36 27v-6"/><path d="M42 25v-2"/></svg></div><h1>Train with a voice built for interpreters.</h1><p>Ask, speak, generate drills, move material into practice modes, and review your performance in Arabic, English, or French.</p><div class="suggestions"><button class="suggestion" onclick="useSuggestion('Give me a 10-minute consecutive interpreting drill for today.')">10-minute drill</button><button class="suggestion" onclick="useSuggestion('Give me a simultaneous interpreting passage on diplomacy.')">Simultaneous passage</button><button class="suggestion" onclick="useSuggestion('Give me a shadowing exercise in French.')">French shadowing</button></div></div><div id="messages" class="messages" aria-live="polite"></div><div id="typingHost"></div></div></div><div id="chatError" class="chat-error" role="alert"></div><div class="composer-shell"><div class="composer"><textarea id="chatInput" rows="1" maxlength="4000" placeholder="Message Interpreter AI" aria-label="Message Interpreter AI"></textarea><button id="sendBtn" class="send-btn" type="button" aria-label="Send message" onclick="sendChat()" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button></div><div class="composer-meta">Free AI · automatic Gemini fallback · local documents + multimodal media</div></div></section>
 </div>
 <script>
   const HISTORY_KEY='interpreterCoachHistoryV4';let history=loadHistory(),busy=false;const $=id=>document.getElementById(id);
   function nativePracticeContext(){try{return window.InterpreterNative?.getPracticeContext?.()||'No saved practice context.'}catch(_){return'No saved practice context.'}}function loadHistory(){try{const p=JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]');return Array.isArray(p)?p.filter(x=>x&&['user','assistant'].includes(x.role)&&typeof x.content==='string').slice(-20):[]}catch(_){return[]}}function saveHistory(){try{localStorage.setItem(HISTORY_KEY,JSON.stringify(history.slice(-20)))}catch(_){}}function setStatus(text,state='idle'){$('statusText').textContent=text;$('statusDot').className='status-dot'+(state==='ok'?' ok':state==='bad'?' bad':'')}function showPane(_name){$('chatPane')?.classList.add('active')}function escapeHtml(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}function inlineMarkdown(v){return escapeHtml(v).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')}
   function renderRichText(container,text){container.innerHTML='';const lines=String(text).replace(/\r/g,'').split('\n');let list=null,listType='';for(const raw of lines){const t=raw.trim();if(!t){list=null;listType='';continue}if(t.startsWith('### ')){const h=document.createElement('h3');h.innerHTML=inlineMarkdown(t.slice(4));container.appendChild(h);list=null;continue}if(t.startsWith('## ')||t.startsWith('# ')){const h=document.createElement('h2');h.innerHTML=inlineMarkdown(t.slice(t.startsWith('## ')?3:2));container.appendChild(h);list=null;continue}const b=t.match(/^[-*]\s+(.+)/),n=t.match(/^\d+[.)]\s+(.+)/);if(b||n){const wanted=n?'ol':'ul';if(!list||listType!==wanted){list=document.createElement(wanted);listType=wanted;container.appendChild(list)}const li=document.createElement('li');li.innerHTML=inlineMarkdown((b||n)[1]);list.appendChild(li);continue}list=null;const p=document.createElement('p');p.innerHTML=inlineMarkdown(t);container.appendChild(p)}}
   function messageElement(role,text,options={}){const row=document.createElement('div');row.className='message '+role;if(role==='assistant'){const a=document.createElement('div');a.className='avatar';a.textContent='IT';row.appendChild(a)}const body=document.createElement('div');body.className='message-body';const bubble=document.createElement('div');bubble.className='bubble';role==='assistant'?renderRichText(bubble,text):bubble.textContent=text;body.appendChild(bubble);if(role==='assistant'&&!options.historical){const actions=document.createElement('div');actions.className='message-actions';const copy=document.createElement('button');copy.className='message-action';copy.type='button';copy.textContent='Copy';copy.onclick=async()=>{try{await navigator.clipboard.writeText(text);copy.textContent='Copied'}catch(_){copy.textContent='Copy failed'}setTimeout(()=>copy.textContent='Copy',1100)};actions.appendChild(copy);body.appendChild(actions)}row.appendChild(body);return row}function addMessage(role,text,options={}){$('welcome').hidden=true;$('messages').appendChild(messageElement(role,text,options));requestAnimationFrame(scrollToBottom)}function renderHistory(){$('messages').innerHTML='';$('welcome').hidden=history.length>0;history.forEach(x=>addMessage(x.role,x.content,{historical:true}));scrollToBottom(false)}function scrollToBottom(smooth=true){const s=$('chatScroll');s.scrollTo({top:s.scrollHeight,behavior:smooth?'smooth':'auto'})}function showTyping(){$('typingHost').innerHTML='<div class="typing-row"><div class="avatar">IT</div><div class="typing"><span></span><span></span><span></span></div></div>';requestAnimationFrame(scrollToBottom)}function hideTyping(){$('typingHost').innerHTML=''}function responseText(r){if(typeof r==='string')return r.trim();const c=r?.message?.content;if(typeof c==='string')return c.trim();if(Array.isArray(c))return c.map(p=>typeof p==='string'?p:(p?.text||'')).join('').trim();return typeof r?.text==='string'?r.text.trim():''}
-  const FREE_AI_MODEL='gemini-3.7-flash';
+  const FREE_AI_MODELS=['gemini-3.7-flash','gemini-3.6-flash','gemini-3.5-flash','gemini-3.5-flash-lite'];
+  const FREE_AI_MODEL=FREE_AI_MODELS[0];
+  const FREE_AI_LABELS={
+    'gemini-3.7-flash':'Gemini 3.7 Flash',
+    'gemini-3.6-flash':'Gemini 3.6 Flash',
+    'gemini-3.5-flash':'Gemini 3.5 Flash',
+    'gemini-3.5-flash-lite':'Gemini 3.5 Flash-Lite'
+  };
   function freeAiKey(){try{return String(window.InterpreterNative?.getFreeAiApiKey?.()||'').trim()}catch(_){return''}}
   function freeAiReady(){return freeAiKey().length>=20}
   function ensureFreeAiSetupUi(){
@@ -53,18 +60,67 @@
   async function geminiChat(messages,options={}){
     const key=freeAiKey();
     if(!key){openFreeAiSetup();throw new Error('Free AI setup is required. Add a free Google AI Studio key once to continue without Puter payments.')}
-    const system=messages.filter(m=>m?.role==='system').map(m=>plainTextContent(m.content)).filter(Boolean).join('\n\n');
+    const system=messages.filter(m=>m?.role==='system').map(m=>plainTextContent(m.content)).filter(Boolean).join('
+
+');
     const contents=[];
     for(const message of messages){if(!message||message.role==='system')continue;const parts=geminiParts(message.content);if(!parts.length)continue;contents.push({role:message.role==='assistant'?'model':'user',parts})}
     const body={contents,generationConfig:{maxOutputTokens:Math.min(Number(options.max_tokens)||900,2200)}};
     if(system)body.system_instruction={parts:[{text:system}]};
-    const response=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+FREE_AI_MODEL+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(body)});
-    const data=await response.json().catch(()=>({}));
-    if(!response.ok){const upstream=data?.error?.message||('HTTP '+response.status);if(response.status===429)throw new Error('The free Gemini rate limit was reached. Wait for the free quota window to reset and try again.');if(response.status===400||response.status===401||response.status===403)throw new Error('The free Gemini key was rejected. Open Free AI setup and replace the key.');throw new Error(upstream)}
-    const answer=(data?.candidates?.[0]?.content?.parts||[]).map(part=>part?.text||'').join('').trim();
-    if(!answer)throw new Error('The free AI returned an empty response.');
-    setStatus('Free AI · ready','ok');
-    return {message:{content:answer},text:answer};
+
+    const preferred=String(options.model||'');
+    const models=FREE_AI_MODELS.includes(preferred)
+      ? [preferred,...FREE_AI_MODELS.filter(model=>model!==preferred)]
+      : [...FREE_AI_MODELS];
+    let lastFailure='The free AI request failed.';
+
+    for(let index=0;index<models.length;index+=1){
+      const model=models[index];
+      const label=FREE_AI_LABELS[model]||model;
+      if(index>0)setStatus('Free AI · switching to '+label+'…','idle');
+      let response;
+      let data={};
+      try{
+        response=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','x-goog-api-key':key},
+          body:JSON.stringify(body)
+        });
+        data=await response.json().catch(()=>({}));
+      }catch(error){
+        lastFailure=error?.message||String(error);
+        if(index<models.length-1)continue;
+        throw new Error('Free AI could not reach Google after trying all fallback models. Check the internet connection and try again.');
+      }
+
+      if(!response.ok){
+        const upstream=data?.error?.message||('HTTP '+response.status);
+        const lowered=String(upstream).toLowerCase();
+        const keyProblem=(response.status===401||response.status===403||/api key|key not valid|invalid key|permission denied|unauthenticated|forbidden/.test(lowered));
+        if(keyProblem){throw new Error('The free Gemini key was rejected. Open Free AI setup and replace the key.')}
+        const retryable=(response.status===404||response.status===408||response.status===409||response.status===429||response.status>=500||/high demand|overload|overloaded|capacity|temporar|resource exhausted|unavailable|try again later|deadline/.test(lowered));
+        lastFailure=upstream;
+        if(retryable&&index<models.length-1)continue;
+        if(response.status===429||/high demand|overload|capacity|resource exhausted/.test(lowered)){
+          throw new Error('All free Gemini fallback models are currently busy or rate-limited. Please try again shortly.')
+        }
+        throw new Error(upstream);
+      }
+
+      const answer=(data?.candidates?.[0]?.content?.parts||[]).map(part=>part?.text||'').join('').trim();
+      if(!answer){
+        lastFailure='The free AI returned an empty response from '+label+'.';
+        if(index<models.length-1)continue;
+        throw new Error(lastFailure);
+      }
+
+      window.__interpreterAiActiveModel=model;
+      setStatus('Free AI · '+label+' · ready','ok');
+      const meta=document.querySelector('.composer-meta');
+      if(meta)meta.textContent='Free AI · '+label+' · automatic fallback · local documents + multimodal media';
+      return {message:{content:answer},text:answer,model};
+    }
+    throw new Error(lastFailure);
   }
   window.__interpreterAiRequest=geminiChat;
 

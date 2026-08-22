@@ -144,6 +144,7 @@ private class PracticeContextBridge(
 ) : RecognitionListener, TextToSpeech.OnInitListener {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val microphoneOwnerId = "ai-voice-${System.identityHashCode(this)}"
+    private val aiSettings = context.getSharedPreferences("interpreter_ai_settings", Context.MODE_PRIVATE)
 
     private var webView: WebView? = null
     private var recognizer: SpeechRecognizer? = null
@@ -174,6 +175,31 @@ private class PracticeContextBridge(
 
     @JavascriptInterface
     fun getPracticeContext(): String = contextValue
+
+    @JavascriptInterface
+    fun getFreeAiApiKey(): String = aiSettings.getString("gemini_api_key", "").orEmpty()
+
+    @JavascriptInterface
+    fun setFreeAiApiKey(value: String): Boolean {
+        val clean = value.trim()
+        if (clean.length !in 20..256) return false
+        aiSettings.edit().putString("gemini_api_key", clean).apply()
+        return true
+    }
+
+    @JavascriptInterface
+    fun clearFreeAiApiKey(): Boolean {
+        aiSettings.edit().remove("gemini_api_key").apply()
+        return true
+    }
+
+    @JavascriptInterface
+    fun openFreeAiKeyPage(): Boolean = runCatching {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
 
     fun setPreparedAttachments(items: List<PreparedAttachment>) {
         preparedAttachments.clear()

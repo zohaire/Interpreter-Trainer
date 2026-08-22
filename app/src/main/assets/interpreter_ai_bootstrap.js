@@ -19,23 +19,25 @@
     if (node) node.textContent = message || '';
   };
 
-  const sdkReady = () => Boolean(window.puter?.ai?.chat);
+  const freeProviderReady = () => {
+    try { return String(window.InterpreterNative?.getFreeAiApiKey?.() || '').trim().length >= 20; }
+    catch (_) { return false; }
+  };
 
-  // Deliberately synchronous: the first puter.ai.chat() invocation must still happen inside the
-  // original user action so Android WebView retains transient activation for first-use auth.
   const providerReady = () => {
     if (navigator.onLine === false) {
       setConnectionStatus('No internet connection · AIV5-LIVE', 'bad');
       setError('Interpreter AI needs an internet connection.');
       return false;
     }
-    if (!sdkReady()) {
-      setConnectionStatus('AI service unavailable · AIV5-LIVE', 'bad');
-      setError('Interpreter AI could not load its online service. Check your connection and try again.');
+    if (!freeProviderReady()) {
+      setConnectionStatus('Free AI setup needed · AIV5-LIVE', 'bad');
+      setError('Add a free Google AI Studio key once to use Interpreter AI without Puter payments.');
+      try { window.openFreeAiSetup?.(); } catch (_) {}
       return false;
     }
 
-    setConnectionStatus('Online AI · ready · AIV5-LIVE', 'ok');
+    setConnectionStatus('Free AI · ready · AIV5-LIVE', 'ok');
     setError('');
     return true;
   };
@@ -175,19 +177,8 @@
         return;
       }
 
-      // Voice recognition callbacks are not browser user gestures. Authenticate/warm the provider
-      // while the user is still inside the Interpreter Live button tap, then start the microphone.
-      try {
-        const signedIn = window.puter?.auth?.isSignedIn?.() === true;
-        if (!signedIn) {
-          const warmup = puter.ai.chat([
-            { role:'system', content:'Initialize an interpreter-training voice session.' },
-            { role:'user', content:'Reply only READY.' }
-          ], { model:'qwen/qwen3.8-max', max_tokens:2, temperature:0 });
-          await warmup;
-        }
-      } catch (error) {
-        callStatus('Connection failed', error?.message || 'Interpreter AI authentication could not complete.');
+      if (typeof window.ensureConnected === 'function' && !(await window.ensureConnected())) {
+        callStatus('Connection failed', 'Complete Free AI setup and try again.');
         window.__voiceCallActive = false;
         return;
       }

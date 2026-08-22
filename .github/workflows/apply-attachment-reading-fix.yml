@@ -31,7 +31,9 @@ jobs:
           node-version: '22'
 
       - name: Apply guarded attachment reading fix
-        run: python3 tools/fix_ai_attachment_reading.py
+        run: |
+          python3 tools/fix_ai_attachment_reading.py
+          python3 tools/limit_qwen_native_attachments.py
 
       - name: Verify attachment pipeline
         shell: bash
@@ -42,14 +44,18 @@ jobs:
           grep -q "puter.ai.speech2txt" "$FILE"
           grep -q "item.localText" "$FILE"
           grep -q "extracted or transcribed for reliable reading" "$FILE"
-          grep -q "type:'file',puter_path:item.path" "$FILE"
+          grep -q "ready.filter(item=>item.kind==='vision')" "$FILE"
           python3 - <<'PY'
           from pathlib import Path
           import re
           html=Path('app/src/main/assets/interpreter_coach.html').read_text(encoding='utf-8')
           scripts=re.findall(r'<script>(.*?)</script>',html,flags=re.S)
           assert scripts, 'No inline scripts found'
-          Path('/tmp/interpreter-attachment-script.js').write_text(scripts[-1],encoding='utf-8')
+          script=scripts[-1]
+          assert "puter.ai.speech2txt" in script
+          assert "DOC_READER_MODEL='claude-sonnet-4-6'" in script
+          assert "ready.filter(item=>item.kind==='vision')" in script
+          Path('/tmp/interpreter-attachment-script.js').write_text(script,encoding='utf-8')
           PY
           node --check /tmp/interpreter-attachment-script.js
 

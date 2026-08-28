@@ -8,6 +8,16 @@ plugins {
 }
 
 val ciDebugKeystorePath = providers.environmentVariable("INTERPRETER_DEBUG_KEYSTORE").orNull
+val releaseKeystorePath = providers.environmentVariable("INTERPRETER_RELEASE_KEYSTORE").orNull
+val releaseStorePassword = providers.environmentVariable("INTERPRETER_RELEASE_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("INTERPRETER_RELEASE_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("INTERPRETER_RELEASE_KEY_PASSWORD").orNull
+val hasReleaseSigning = listOf(
+    releaseKeystorePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
 
 android {
     namespace = "com.interpretertrainer.app"
@@ -17,8 +27,10 @@ android {
         applicationId = "com.interpretertrainer.app"
         minSdk = 31
         targetSdk = 36
-        versionCode = providers.environmentVariable("INTERPRETER_VERSION_CODE").orNull?.toIntOrNull() ?: 10
-        versionName = "0.5.5"
+        versionCode = providers.environmentVariable("INTERPRETER_VERSION_CODE").orNull?.toIntOrNull() ?: 100_001
+        versionName = providers.environmentVariable("INTERPRETER_VERSION_NAME").orNull
+            ?.removePrefix("v")
+            ?: "1.0.0-preview.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -33,6 +45,14 @@ android {
                 keyPassword = "android"
             }
         }
+        create("release") {
+            if (hasReleaseSigning) {
+                storeFile = file(requireNotNull(releaseKeystorePath))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+            }
+        }
     }
 
     buildTypes {
@@ -40,7 +60,12 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         release {
-            isMinifyEnabled = false
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -60,6 +85,13 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
+
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = true
+        htmlReport = true
+        sarifReport = true
     }
 }
 

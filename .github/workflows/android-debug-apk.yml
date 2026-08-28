@@ -1,4 +1,4 @@
-name: Build Android Debug APK
+name: Android quality and release
 
 on:
   workflow_dispatch:
@@ -6,6 +6,9 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
+
+permissions:
+  contents: read
 
 jobs:
   puter-ai-browser-test:
@@ -253,6 +256,9 @@ jobs:
   build:
     needs: puter-ai-browser-test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -263,10 +269,11 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Gradle 8.13
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.13'
 
       - name: Install stable development signing key
         shell: bash
@@ -330,16 +337,21 @@ jobs:
 
           echo "Interpreter AI5-LIVE, microphone coordination and natural voice guards passed."
 
-      - name: Test media link routing
-        run: gradle --no-daemon :app:testDebugUnitTest
+      - name: Run unit tests and Android lint
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug
 
-      - name: Build debug APK
+      - name: Build debug and optimized preview packages
         env:
-          INTERPRETER_VERSION_CODE: ${{ github.run_number }}
+          INTERPRETER_VERSION_CODE: 100${{ github.run_number }}
+          INTERPRETER_VERSION_NAME: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('1.0.0-preview.{0}', github.run_number) || '1.0.0-preview.ci' }}
           INTERPRETER_DEBUG_KEYSTORE: ${{ runner.temp }}/interpreter-debug.keystore
-        run: gradle --no-daemon :app:assembleDebug
+          INTERPRETER_RELEASE_KEYSTORE: ${{ runner.temp }}/interpreter-debug.keystore
+          INTERPRETER_RELEASE_STORE_PASSWORD: android
+          INTERPRETER_RELEASE_KEY_ALIAS: androiddebugkey
+          INTERPRETER_RELEASE_KEY_PASSWORD: android
+        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease :app:bundleRelease
 
-      - name: Verify APK signing certificate
+      - name: Verify package signatures
         shell: bash
         run: |
           set -euo pipefail
@@ -353,21 +365,68 @@ jobs:
             -file /tmp/interpreter-debug-cert.der >/dev/null 2>&1
           EXPECTED_SHA256="$(sha256sum /tmp/interpreter-debug-cert.der | awk '{print tolower($1)}')"
 
-          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk \
-            | tee /tmp/apk-signing.txt
-          ACTUAL_SHA256="$(awk -F': ' '/certificate SHA-256 digest:/ {print tolower($NF); exit}' /tmp/apk-signing.txt | tr -d '[:space:]')"
+          for APK in \
+            app/build/outputs/apk/debug/app-debug.apk \
+            app/build/outputs/apk/release/app-release.apk; do
+            "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/apk-signing.txt
+            ACTUAL_SHA256="$(awk -F': ' '/certificate SHA-256 digest:/ {print tolower($NF); exit}' /tmp/apk-signing.txt | tr -d '[:space:]')"
+            if [ -z "$ACTUAL_SHA256" ] || [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+              echo "APK signing certificate mismatch for $APK."
+              exit 1
+            fi
+          done
+          jarsigner -verify app/build/outputs/bundle/release/app-release.aab >/dev/null
+          echo "APK and app-bundle signatures are valid for the public preview key."
 
-          if [ -z "$ACTUAL_SHA256" ] || [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
-            echo "APK signing certificate mismatch."
-            echo "Expected: $EXPECTED_SHA256"
-            echo "Actual:   ${ACTUAL_SHA256:-missing}"
-            exit 1
-          fi
-          echo "APK signing certificate matches the stable Interpreter Trainer development key."
-
-      - name: Upload debug APK
+      - name: Upload tested preview packages and reports
         uses: actions/upload-artifact@v4
         with:
-          name: interpreter-trainer-debug-apk-AIV5-LIVE-${{ github.sha }}
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: interpreter-trainer-preview-${{ github.sha }}
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/bundle/release/app-release.aab
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/lint-results-debug.html
           if-no-files-found: error
+
+  publish-preview:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
+      - name: Download tested packages
+        uses: actions/download-artifact@v4
+        with:
+          name: interpreter-trainer-preview-${{ github.sha }}
+          path: dist
+
+      - name: Publish tagged public preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v1.0.0-preview.${GITHUB_RUN_NUMBER}"
+          APK="$(find dist -path '*/apk/release/app-release.apk' -type f -print -quit)"
+          AAB="$(find dist -path '*/bundle/release/app-release.aab' -type f -print -quit)"
+          test -n "$APK" && test -n "$AAB"
+          cp "$APK" Interpreter-Trainer-${TAG}.apk
+          cp "$AAB" Interpreter-Trainer-${TAG}.aab
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$GITHUB_SHA" -m "Interpreter Trainer $TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" \
+            --verify-tag \
+            --prerelease \
+            --title "Interpreter Trainer ${TAG}" \
+            --notes-file docs/PREVIEW_RELEASE_NOTES.md \
+            "Interpreter-Trainer-${TAG}.apk#Android APK (public preview signing key)" \
+            "Interpreter-Trainer-${TAG}.aab#Android App Bundle (public preview signing key)"

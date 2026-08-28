@@ -14,6 +14,12 @@ interface PracticeSessionDao {
     @Query("SELECT * FROM practice_sessions WHERE id = :id LIMIT 1")
     fun observeById(id: Long): Flow<PracticeSessionEntity?>
 
+    @Query("SELECT * FROM practice_sessions WHERE id = :id LIMIT 1")
+    suspend fun findById(id: Long): PracticeSessionEntity?
+
+    @Query("SELECT recordingPath FROM practice_sessions WHERE recordingPath IS NOT NULL")
+    suspend fun listRecordingPaths(): List<String?>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(session: PracticeSessionEntity): Long
 

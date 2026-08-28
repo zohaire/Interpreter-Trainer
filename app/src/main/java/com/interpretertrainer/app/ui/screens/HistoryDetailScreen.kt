@@ -20,6 +20,7 @@ fun HistoryDetailScreen(id: Long, onBack: () -> Unit, sessionViewModel: SessionV
     val item = session.firstOrNull { it.id == id }
     val context = LocalContext.current
     val recordingMedia = remember { MediaController(context) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         onDispose { recordingMedia.release() }
@@ -72,17 +73,36 @@ fun HistoryDetailScreen(id: Long, onBack: () -> Unit, sessionViewModel: SessionV
                 }
                 item.aiFeedback?.takeIf { it.isNotBlank() }?.let { feedback ->
                     SectionCard {
-                        Text("Local Coach feedback", style = MaterialTheme.typography.titleMedium)
+                        Text("Interpreter Coach feedback", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
                         Text(feedback)
                     }
                 }
-                OutlinedButton(onClick = {
+                OutlinedButton(onClick = { showDeleteConfirmation = true }) {
+                    Text("Delete session")
+                }
+            }
+        }
+    }
+
+    if (showDeleteConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = false },
+            title = { Text("Delete this session?") },
+            text = { Text("The saved transcript, notes, feedback and practice recording will be permanently removed from this device.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirmation = false
                     recordingMedia.pause()
                     sessionViewModel.delete(id)
                     onBack()
-                }) { Text("Delete session") }
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = false }) { Text("Cancel") }
             }
-        }
+        )
     }
 }

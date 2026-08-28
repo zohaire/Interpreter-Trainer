@@ -18,12 +18,15 @@
 
     <application
         android:name=".InterpreterTrainerApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
+        android:fullBackupContent="false"
         android:icon="@drawable/ic_app"
         android:label="Interpreter Trainer"
         android:roundIcon="@drawable/ic_app"
         android:supportsRtl="true"
-        android:theme="@style/Theme.InterpreterTrainer">
+        android:theme="@style/Theme.InterpreterTrainer"
+        android:usesCleartextTraffic="false">
 
         <activity
             android:name=".MainActivity"

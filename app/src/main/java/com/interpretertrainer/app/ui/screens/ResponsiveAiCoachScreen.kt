@@ -87,7 +87,7 @@ fun ResponsiveAiCoachScreen(
                     // JavascriptInterface objects are exposed to JavaScript after a navigation.
                     // Attach the optional duplex bridge once and reload the bundled coach once.
                     liveBridge.attachWebView(webView)
-                    webView.addJavascriptInterface(liveBridge, "InterpreterLiveNative")
+                    attachInterpreterLiveBridge(webView, liveBridge)
                     attachedWebView.value = webView
                     webView.loadDataWithBaseURL(
                         "https://interpreter-trainer.app/",
@@ -138,6 +138,14 @@ fun ResponsiveAiCoachScreen(
             delay(140)
         }
     }
+}
+
+/** Keeps Android lint's JavaScript-interface analysis on the concrete, annotated bridge type. */
+private fun attachInterpreterLiveBridge(
+    webView: WebView,
+    bridge: InterpreterLiveNativeBridge
+) {
+    webView.addJavascriptInterface(bridge, "InterpreterLiveNative")
 }
 
 private fun readAsset(context: android.content.Context, name: String): String =

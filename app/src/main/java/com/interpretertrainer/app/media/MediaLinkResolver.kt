@@ -34,7 +34,7 @@ object MediaLinkResolver {
         val normalized = normalizeScheme(extracted)
         val uri = URI(normalized)
         val scheme = uri.scheme?.lowercase(Locale.ROOT)
-        require(scheme == "http" || scheme == "https") { "Use an http:// or https:// link." }
+        require(scheme == "https") { "Use a secure https:// link." }
 
         val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.")
             ?: error("That link does not contain a valid website address.")
@@ -96,7 +96,7 @@ object MediaLinkResolver {
         val segments = uri.path.orEmpty().split('/').filter { it.isNotBlank() }
         val candidate = when {
             host == "youtu.be" -> segments.firstOrNull()
-            host.endsWith("youtube.com") || host.endsWith("youtube-nocookie.com") -> when {
+            isDomain(host, "youtube.com") || isDomain(host, "youtube-nocookie.com") -> when {
                 uri.path == "/watch" -> queryParameters(uri.rawQuery)["v"]
                 segments.firstOrNull() in setOf("shorts", "embed", "live") -> segments.getOrNull(1)
                 else -> null
@@ -107,7 +107,7 @@ object MediaLinkResolver {
     }
 
     private fun vimeoId(uri: URI, host: String): String? {
-        if (!host.endsWith("vimeo.com")) return null
+        if (!isDomain(host, "vimeo.com")) return null
         return uri.path.orEmpty()
             .split('/')
             .filter { it.isNotBlank() }
@@ -126,4 +126,7 @@ object MediaLinkResolver {
 
     private fun decode(value: String): String =
         URLDecoder.decode(value, StandardCharsets.UTF_8.name())
+
+    private fun isDomain(host: String, domain: String): Boolean =
+        host == domain || host.endsWith(".$domain")
 }

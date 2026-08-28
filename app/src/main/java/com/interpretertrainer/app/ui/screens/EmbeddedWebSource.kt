@@ -48,6 +48,9 @@ fun EmbeddedWebSource(
                     mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     allowFileAccess = false
                     allowContentAccess = false
+                    allowFileAccessFromFileURLs = false
+                    allowUniversalAccessFromFileURLs = false
+                    safeBrowsingEnabled = true
                     cacheMode = WebSettings.LOAD_DEFAULT
                     builtInZoomControls = true
                     displayZoomControls = false

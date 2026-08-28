@@ -54,4 +54,22 @@ class MediaLinkResolverTest {
     fun rejectsNonHttpSchemes() {
         assertTrue(MediaLinkResolver.resolve("file:///sdcard/video.mp4").isFailure)
     }
+
+    @Test
+    fun rejectsCleartextHttp() {
+        assertTrue(MediaLinkResolver.resolve("http://example.com/video.mp4").isFailure)
+    }
+
+    @Test
+    fun doesNotTreatLookalikeDomainsAsTrustedPlayers() {
+        val youtubeLookalike = MediaLinkResolver.resolve(
+            "https://evil-youtube.com/watch?v=dQw4w9WgXcQ"
+        ).getOrThrow()
+        val vimeoLookalike = MediaLinkResolver.resolve(
+            "https://notvimeo.com/76979871"
+        ).getOrThrow()
+
+        assertEquals(MediaLinkKind.WEB_PAGE, youtubeLookalike.kind)
+        assertEquals(MediaLinkKind.WEB_PAGE, vimeoLookalike.kind)
+    }
 }

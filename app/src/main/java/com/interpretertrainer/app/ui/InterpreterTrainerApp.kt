@@ -18,6 +18,7 @@ object Routes {
     const val TRANSCRIPTION = "transcription"
     const val AI_COACH = "ai-coach"
     const val HISTORY = "history"
+    const val PRIVACY = "privacy"
     const val HISTORY_DETAIL = "history/{id}"
 }
 
@@ -75,6 +76,7 @@ fun InterpreterTrainerApp(
             )
         }
         composable(Routes.HISTORY) { HistoryScreen(onBack = navController::popBackStack, sessionViewModel) { id -> navController.navigate("history/$id") } }
+        composable(Routes.PRIVACY) { PrivacyScreen(onBack = navController::popBackStack) }
         composable(
             Routes.HISTORY_DETAIL,
             arguments = listOf(navArgument("id") { type = NavType.LongType })

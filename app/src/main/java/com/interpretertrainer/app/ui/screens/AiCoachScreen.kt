@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -21,14 +22,20 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
@@ -38,10 +45,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.interpretertrainer.app.BuildConfig
 import com.interpretertrainer.app.ai.AiPracticeBridge
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
+import com.interpretertrainer.app.privacy.AiPrivacyPreferences
 import com.interpretertrainer.app.speech.MicrophoneSessionCoordinator
 import com.interpretertrainer.app.speech.NaturalAndroidVoice
 import com.interpretertrainer.app.viewmodel.SessionViewModel
@@ -57,6 +67,64 @@ import java.util.Locale
  */
 @Composable
 fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
+    val context = LocalContext.current
+    val accepted = remember(context) {
+        mutableStateOf(AiPrivacyPreferences.hasAccepted(context))
+    }
+
+    if (!accepted.value) {
+        AiPrivacyDisclosure(
+            onBack = onBack,
+            onAccept = {
+                AiPrivacyPreferences.accept(context)
+                accepted.value = true
+            }
+        )
+        return
+    }
+
+    ActiveAiCoachScreen(onBack = onBack, sessionViewModel = sessionViewModel)
+}
+
+@Composable
+private fun AiPrivacyDisclosure(onBack: () -> Unit, onAccept: () -> Unit) {
+    TrainerScaffold("Before you use Interpreter AI", onBack) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 20.dp, vertical = 18.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                "Interpreter AI is an optional online service.",
+                style = MaterialTheme.typography.headlineSmall
+            )
+            Text(
+                "To provide chat and evaluation, the app sends your messages, submitted evaluation material and up to five recent practice summaries—including saved notes or feedback—to Puter and the selected Qwen model.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "Voice recognition may use Android's configured speech service. AI voice output may use Puter text-to-speech, with Android text-to-speech as a fallback.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "No neural model is downloaded. Puter authentication and its provider terms and privacy policy apply. Core practice modes remain available if you go back.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(onClick = onAccept, modifier = Modifier.fillMaxWidth()) {
+                Text("Continue to Interpreter AI")
+            }
+            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+                Text("Not now")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveAiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
     val sessions by sessionViewModel.sessions.collectAsState()
     val context = LocalContext.current
     val bridgeHolder = remember { mutableStateOf<PracticeContextBridge?>(null) }
@@ -85,6 +153,7 @@ fun AiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel) {
             webViewRef.value?.let { webView ->
                 runCatching { webView.stopLoading() }
                 runCatching { webView.removeJavascriptInterface("InterpreterNative") }
+                runCatching { webView.loadUrl("about:blank") }
                 runCatching { webView.destroy() }
             }
             webViewRef.value = null
@@ -421,11 +490,24 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
     )
     bridge.attachWebView(webView)
     configureCoachWebView(webView)
+    WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
     webView.addJavascriptInterface(bridge, "InterpreterNative")
     webView.webViewClient = object : WebViewClient() {
+        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+            val uri = request?.url ?: return true
+            if (!request.isForMainFrame) return false
+            if (isCoachOrigin(uri)) return false
+            if (request.hasGesture() && uri.scheme.equals("https", ignoreCase = true)) {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+            }
+            return true
+        }
+
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
-            view?.evaluateJavascript(coachEnhancementScript(), null)
+            if (isCoachOrigin(url?.let(Uri::parse))) {
+                view?.evaluateJavascript(coachEnhancementScript(), null)
+            }
         }
     }
     webView.webChromeClient = CoachChromeClient(context)
@@ -436,7 +518,7 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
     }
 
     webView.loadDataWithBaseURL(
-        "https://interpreter-trainer.app/",
+        COACH_ORIGIN,
         html,
         "text/html",
         "UTF-8",
@@ -911,6 +993,9 @@ private fun configureCoachWebView(webView: WebView) {
         mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         allowFileAccess = false
         allowContentAccess = false
+        allowFileAccessFromFileURLs = false
+        allowUniversalAccessFromFileURLs = false
+        safeBrowsingEnabled = true
         mediaPlaybackRequiresUserGesture = false
         cacheMode = WebSettings.LOAD_DEFAULT
     }
@@ -956,7 +1041,12 @@ private class CoachChromeClient(private val context: Context) : WebChromeClient(
             )
         }
 
-        popup.webViewClient = WebViewClient()
+        popup.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val uri = request?.url ?: return true
+                return uri.scheme != "https" && uri.toString() != "about:blank"
+            }
+        }
         popup.webChromeClient = object : WebChromeClient() {
             override fun onCloseWindow(window: WebView?) {
                 if (dialog.isShowing) dialog.dismiss()
@@ -967,6 +1057,8 @@ private class CoachChromeClient(private val context: Context) : WebChromeClient(
         dialog.setCanceledOnTouchOutside(false)
         dialog.setOnDismissListener {
             runCatching { popup.stopLoading() }
+            runCatching { popup.loadUrl("about:blank") }
+            runCatching { popupContainer.removeAllViews() }
             runCatching { popup.destroy() }
         }
 
@@ -984,6 +1076,12 @@ private class CoachChromeClient(private val context: Context) : WebChromeClient(
         return true
     }
 }
+
+private const val COACH_ORIGIN = "https://app.interpretertrainer.invalid/"
+
+private fun isCoachOrigin(uri: Uri?): Boolean =
+    uri?.scheme.equals("https", ignoreCase = true) &&
+        uri?.host.equals("app.interpretertrainer.invalid", ignoreCase = true)
 
 private fun buildPracticeContext(sessions: List<PracticeSessionEntity>): String = buildString {
     appendLine("AUTHORITATIVE APP IDENTITY:")

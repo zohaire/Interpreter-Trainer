@@ -18,8 +18,8 @@ class MediaController(context: Context) {
         val url = rawUrl.trim()
         require(url.isNotBlank()) { "Paste a media URL first." }
         val uri = Uri.parse(url)
-        require(uri.scheme.equals("https", ignoreCase = true) || uri.scheme.equals("http", ignoreCase = true)) {
-            "Use an http:// or https:// media URL."
+        require(uri.scheme.equals("https", ignoreCase = true)) {
+            "Use a secure https:// media URL."
         }
         load(uri)
     }

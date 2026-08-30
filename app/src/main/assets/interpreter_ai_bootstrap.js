@@ -31,8 +31,9 @@
       return false;
     }
     if (!sdkReady()) {
-      setConnectionStatus('AI service unavailable', 'bad');
-      setError('Interpreter AI could not load its online service. Check your connection and try again.');
+      try { window.__loadInterpreterAiSdk?.()?.catch?.(() => {}); } catch (_) {}
+      setConnectionStatus('Connecting to professional AI…');
+      setError('Interpreter AI is still connecting. Please try again in a moment.');
       return false;
     }
 

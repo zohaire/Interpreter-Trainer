@@ -189,6 +189,9 @@ jobs:
             await page.goto('http://127.0.0.1:8765/interpreter_coach.html', {
               waitUntil:'domcontentloaded', timeout:60000
             });
+            await page.waitForFunction(() => Boolean(window.puter?.ai?.chat), null, {
+              timeout:10000
+            });
 
             await page.evaluate(() => {
               window.InterpreterNative = {
@@ -321,6 +324,11 @@ jobs:
           fi
 
           grep -q "https://js.puter.com/v2/" app/src/main/assets/interpreter_coach.html
+          grep -q "__loadInterpreterAiSdk" app/src/main/assets/interpreter_coach.html
+          if grep -q '<script src="https://js.puter.com/v2/' app/src/main/assets/interpreter_coach.html; then
+            echo "Puter must not block the local coach document during startup."
+            exit 1
+          fi
           grep -q "qwen/qwen3.8-27b:free" app/src/main/assets/interpreter_coach.html
           grep -q "puter.ai.txt2speech" app/src/main/assets/interpreter_coach.html
           grep -q "playNaturalInterpreterVoice" app/src/main/assets/interpreter_coach.html
@@ -338,6 +346,9 @@ jobs:
             exit 1
           fi
           grep -q "CoachChromeClient" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q "WebViewAssetLoader" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q "onPageCommitVisible" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q "COACH_STARTUP_TIMEOUT_MS" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q "mediaPlaybackRequiresUserGesture = false" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
 
           grep -q "android.speech.RecognitionService" app/src/main/AndroidManifest.xml

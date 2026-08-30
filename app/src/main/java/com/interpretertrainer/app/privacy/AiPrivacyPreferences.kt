@@ -6,7 +6,7 @@ import android.content.Context
 object AiPrivacyPreferences {
     private const val PREFS = "interpreter_trainer_privacy"
     private const val KEY_AI_DISCLOSURE_VERSION = "ai_disclosure_version"
-    private const val CURRENT_DISCLOSURE_VERSION = 1
+    private const val CURRENT_DISCLOSURE_VERSION = 2
 
     fun hasAccepted(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

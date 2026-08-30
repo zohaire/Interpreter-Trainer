@@ -68,6 +68,10 @@
     const clean = cleanForSpeech(text);
     if (!clean) return false;
 
+    try {
+      if (window.__professionalVoiceSpeak?.(clean, language) === true) return true;
+    } catch (_) {}
+
     if (window.__voiceCallActive && live) {
       try {
         if (live.speakText?.(clean, language) === true) return true;
@@ -78,6 +82,7 @@
   };
 
   const stopOutput = () => {
+    try { window.__stopProfessionalVoice?.(); } catch (_) {}
     try { live?.stopSpeaking?.(); } catch (_) {}
     try { native.stopSpeaking?.(); } catch (_) {}
     try { window.stopNaturalInterpreterVoice?.(); } catch (_) {}
@@ -135,16 +140,19 @@
   const findCut = (pending, force) => {
     if (!pending) return 0;
     if (force) return pending.length;
-    if (pending.length < 22) return 0;
+    const neuralVoice = window.__professionalVoiceEnabled === true;
+    const minimum = neuralVoice ? 44 : 22;
+    if (pending.length < minimum) return 0;
 
-    const preferred = Math.min(pending.length, 72);
-    for (let i = 18; i < preferred; i++) {
+    const preferred = Math.min(pending.length, neuralVoice ? 190 : 72);
+    for (let i = neuralVoice ? 42 : 18; i < preferred; i++) {
       if (/[.!?؟؛;:]/.test(pending[i])) return i + 1;
     }
-    if (pending.length < 54) return 0;
-    const hard = Math.min(58, pending.length);
+    const hardMinimum = neuralVoice ? 150 : 54;
+    if (pending.length < hardMinimum) return 0;
+    const hard = Math.min(neuralVoice ? 175 : 58, pending.length);
     const space = pending.lastIndexOf(' ', hard);
-    return space >= 36 ? space : hard;
+    return space >= (neuralVoice ? 120 : 36) ? space : hard;
   };
 
   const queueReadySpeech = (force = false) => {
@@ -323,10 +331,14 @@
     state.language = window.__voiceCallActive ? callLanguage() : oneShotLanguage();
 
     try {
-      const system = 'You are Interpreter AI, a fast professional coach for interpreters. Work especially well across Arabic, English and French. Help with simultaneous and consecutive interpreting, shadowing, transcription, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. In voice conversations, answer naturally and directly in the user\'s language. Unless the user explicitly asks for detail, keep a voice reply to 1–2 short sentences and put the direct answer first. Never invent scores, transcripts, history or app facts. The authoritative app/context information below is reliable.\n\n' + nativePracticeContext();
+      const system = window.__buildInterpreterCoachPrompt?.({ voice: voiceResponse }) ||
+        ('You are Interpreter AI, a modern professional coach for interpreters. Answer directly in the user\'s language and never invent evidence.\n\n' + nativePracticeContext());
       const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
       const stream = await puter.ai.chat(conversation, {
-        model:'qwen/qwen3.6-27b', stream:true, max_tokens:voiceResponse ? 180 : 650, temperature:0.20
+        model:window.__INTERPRETER_AI_MODEL || 'qwen/qwen3.8-27b:free',
+        stream:true,
+        max_tokens:voiceResponse ? 220 : 760,
+        temperature:0.18
       });
 
       if (responseId !== state.responseId) throw { __interrupted:true };
@@ -366,7 +378,7 @@
       history = history.slice(-16);
       saveHistory();
       addMessage('assistant', answer);
-      setStatus('Online AI · ready · LIVE5', 'ok');
+      setStatus('Professional AI · ready · LIVE6', 'ok');
       window.__voiceAutoSpeak = false;
       window.__voiceOneShot = false;
       pumpSpeech();
@@ -383,7 +395,7 @@
       state.streamComplete = true;
       const message = error?.msg || error?.message || String(error);
       if (errorNode) errorNode.textContent = 'Interpreter AI could not answer: ' + message;
-      setStatus('Request failed · LIVE5', 'bad');
+      setStatus('Request failed · LIVE6', 'bad');
       if (window.__voiceCallActive) {
         setCallStatus('Something went wrong', message);
         scheduleNormalListening(120);

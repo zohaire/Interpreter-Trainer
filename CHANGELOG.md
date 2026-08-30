@@ -1,5 +1,13 @@
 # Changelog
 
+## Interpreter AI startup hotfix — 2026-08-30
+
+- Removed the remote Puter SDK from the coach document's blocking startup path.
+- Restored Android's stable local HTTPS asset loader for the bundled coach interface.
+- Made the local coach visible as soon as its first frame is committed, independently of online AI availability.
+- Added an eight-second startup guard with clear retry and return-to-practice actions instead of an endless spinner.
+- Added a browser regression test that deliberately stalls the remote SDK while verifying that the coach still opens.
+
 ## Professional experience update — 2026-08-30
 
 - Added restrained forward/back screen motion and single-top navigation to prevent duplicate destinations.

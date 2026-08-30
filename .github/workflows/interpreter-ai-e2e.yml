@@ -2,6 +2,18 @@ name: Interpreter AI Integration
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - "app/src/main/assets/interpreter_coach.html"
+      - "app/src/main/assets/interpreter_professional_ai.js"
+      - "app/src/main/assets/interpreter_ai_bootstrap.js"
+      - "app/src/main/assets/interpreter_fast_voice.js"
+      - "app/src/main/assets/interpreter_professional_voice.js"
+      - "app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt"
+      - "app/build.gradle.kts"
+      - ".github/tests/interpreter-coach-startup.cjs"
+      - ".github/workflows/interpreter-ai-e2e.yml"
   push:
     branches: [ "main", "master" ]
     paths:
@@ -11,6 +23,8 @@ on:
       - "app/src/main/assets/interpreter_fast_voice.js"
       - "app/src/main/assets/interpreter_professional_voice.js"
       - "app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt"
+      - "app/build.gradle.kts"
+      - ".github/tests/interpreter-coach-startup.cjs"
       - ".github/workflows/interpreter-ai-e2e.yml"
 
 jobs:
@@ -36,6 +50,14 @@ jobs:
           grep -q 'voiceCallOverlay' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q 'voiceBtn' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q '__fastInterpreterVoiceV4' app/src/main/assets/interpreter_fast_voice.js
+          grep -q '__loadInterpreterAiSdk' app/src/main/assets/interpreter_coach.html
+          grep -q 'WebViewAssetLoader' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q 'onPageCommitVisible' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q 'COACH_STARTUP_TIMEOUT_MS' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          if grep -q '<script src="https://js.puter.com/v2/' app/src/main/assets/interpreter_coach.html; then
+            echo 'Puter must not block the local coach document during startup.'
+            exit 1
+          fi
           if grep -q 'auth.signIn' app/src/main/assets/interpreter_ai_bootstrap.js; then
             echo 'The Android AI bootstrap must not manually sign in.'
             exit 1
@@ -71,6 +93,17 @@ jobs:
           npm init -y >/dev/null
           npm install --silent playwright@1.55.0
           npx playwright install --with-deps chromium
+
+      - name: Test non-blocking coach startup
+        shell: bash
+        env:
+          NODE_PATH: /tmp/interpreter-ai-test/node_modules
+        run: |
+          set -euo pipefail
+          python3 -m http.server 8765 --directory "$GITHUB_WORKSPACE/app/src/main/assets" >/tmp/interpreter-startup-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          node .github/tests/interpreter-coach-startup.cjs
 
       - name: Test Android coach AI plus Interpreter Live controls
         shell: bash
@@ -138,6 +171,9 @@ jobs:
             await page.goto('http://127.0.0.1:8765/interpreter_coach.html', {
               waitUntil: 'domcontentloaded',
               timeout: 60000
+            });
+            await page.waitForFunction(() => Boolean(window.puter?.ai?.chat), null, {
+              timeout: 10000
             });
 
             // InterpreterNative exists before page patches in the real Android WebView.

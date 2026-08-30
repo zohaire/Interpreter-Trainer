@@ -6,10 +6,11 @@ on:
     branches: [ "main", "master" ]
     paths:
       - "app/src/main/assets/interpreter_coach.html"
+      - "app/src/main/assets/interpreter_professional_ai.js"
       - "app/src/main/assets/interpreter_ai_bootstrap.js"
       - "app/src/main/assets/interpreter_fast_voice.js"
+      - "app/src/main/assets/interpreter_professional_voice.js"
       - "app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt"
-      - "app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt"
       - ".github/workflows/interpreter-ai-e2e.yml"
 
 jobs:
@@ -23,11 +24,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node --check app/src/main/assets/interpreter_professional_ai.js
           node --check app/src/main/assets/interpreter_ai_bootstrap.js
           node --check app/src/main/assets/interpreter_fast_voice.js
-          grep -q 'interpreter_ai_bootstrap.js' app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt
-          grep -q 'qwen/qwen3.6-27b' app/src/main/assets/interpreter_coach.html
-          grep -q 'Online AI · ready · AIV5-LIVE' app/src/main/assets/interpreter_ai_bootstrap.js
+          node --check app/src/main/assets/interpreter_professional_voice.js
+          grep -q 'interpreter_ai_bootstrap.js' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q 'interpreter_professional_voice.js' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q 'qwen/qwen3.8-27b:free' app/src/main/assets/interpreter_coach.html
+          grep -q 'Professional AI · ready' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q 'voiceCallLaunch' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q 'voiceCallOverlay' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q 'voiceBtn' app/src/main/assets/interpreter_ai_bootstrap.js
@@ -41,7 +45,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify Qwen3.6 27B remains in Puter live catalog
+      - name: Verify Qwen3.8 27B Free remains in Puter live catalog
         shell: bash
         run: |
           set -euo pipefail
@@ -50,8 +54,8 @@ jobs:
             https://api.puter.com/puterai/chat/models/details \
             --output /tmp/puter-models.json
           test -s /tmp/puter-models.json
-          grep -q 'qwen/qwen3.6-27b' /tmp/puter-models.json
-          echo 'Qwen3.6 27B is available in the live Puter catalog.'
+          grep -q 'qwen/qwen3.8-27b:free' /tmp/puter-models.json
+          echo 'Qwen3.8 27B Free is available in the live Puter catalog.'
 
       - name: Set up Node 22
         uses: actions/setup-node@v4
@@ -92,6 +96,7 @@ jobs:
                   window.__mockSigned = false;
                   window.__signInCalls = 0;
                   window.__chatCalls = [];
+                  window.__ttsCalls = [];
                   window.puter = {
                     auth: {
                       isSignedIn() { return window.__mockSigned === true; },
@@ -113,7 +118,17 @@ jobs:
                         }
                         return Promise.resolve({ message: { content: 'INTERPRETER_AI_OK' } });
                       },
-                      async txt2speech() { throw new Error('not used in this test'); }
+                      async txt2speech(text, options) {
+                        window.__ttsCalls.push({ text, options });
+                        return {
+                          currentTime: 0,
+                          pause() {},
+                          async play() {
+                            this.onplay?.();
+                            this.onended?.();
+                          }
+                        };
+                      }
                     }
                   };
                 `
@@ -137,6 +152,12 @@ jobs:
               };
             });
 
+            const professionalAi = path.join(
+              process.env.GITHUB_WORKSPACE,
+              'app/src/main/assets/interpreter_professional_ai.js'
+            );
+            await page.addScriptTag({ path: professionalAi });
+
             const bootstrap = path.join(
               process.env.GITHUB_WORKSPACE,
               'app/src/main/assets/interpreter_ai_bootstrap.js'
@@ -148,6 +169,12 @@ jobs:
               'app/src/main/assets/interpreter_fast_voice.js'
             );
             await page.addScriptTag({ path: fastVoice });
+
+            const professionalVoice = path.join(
+              process.env.GITHUB_WORKSPACE,
+              'app/src/main/assets/interpreter_professional_voice.js'
+            );
+            await page.addScriptTag({ path: professionalVoice });
             await page.waitForTimeout(250);
 
             const before = await page.evaluate(() => ({
@@ -157,18 +184,24 @@ jobs:
               bootstrapV5: Boolean(window.__interpreterAiBootstrapV5),
               fastVoiceV4: Boolean(window.__fastInterpreterVoiceV4),
               voiceUiRestored: Boolean(window.__voiceUiRestoredByBootstrapV5),
+              professionalAi: Boolean(window.__interpreterProfessionalAiV1),
+              professionalVoice: Boolean(window.__professionalInterpreterVoiceV1),
               voiceButton: Boolean(document.getElementById('voiceBtn')),
               liveLaunch: Boolean(document.getElementById('voiceCallLaunch')),
-              liveOverlay: Boolean(document.getElementById('voiceCallOverlay'))
+              liveOverlay: Boolean(document.getElementById('voiceCallOverlay')),
+              voiceProfile: Boolean(document.getElementById('voiceProfile'))
             }));
             if (!before.bootstrapV5) throw new Error('AI bootstrap V5 did not load.');
             if (!before.fastVoiceV4) throw new Error('Fast Interpreter AI V4 did not load.');
+            if (!before.professionalAi || !before.professionalVoice || !before.voiceProfile) {
+              throw new Error('Professional AI prompt or neural voice layer did not load.');
+            }
             if (!before.voiceUiRestored || !before.voiceButton || !before.liveLaunch || !before.liveOverlay) {
               throw new Error('Interpreter Live / voice controls disappeared from the coach.');
             }
             if (before.signInCalls !== 0) throw new Error('Manual authentication ran before a request.');
             if (before.chatCalls !== 0) throw new Error('AI generated a request before the user sent anything.');
-            if (!/online ai.*ready.*aiv5-live/i.test(before.status)) throw new Error(`Unexpected initial AI status: ${before.status}`);
+            if (!/professional ai.*ready/i.test(before.status)) throw new Error(`Unexpected initial AI status: ${before.status}`);
 
             await page.fill('#chatInput', 'Confirm the interpreter coach works.');
             await page.click('#sendBtn');
@@ -191,10 +224,14 @@ jobs:
             if (!first.chatCalls[0].userActivation) {
               throw new Error('The first puter.ai.chat call lost transient user activation before authentication could open.');
             }
-            if (first.chatCalls[0]?.options?.model !== 'qwen/qwen3.6-27b') {
+            if (first.chatCalls[0]?.options?.model !== 'qwen/qwen3.8-27b:free') {
               throw new Error(`Wrong AI model: ${first.chatCalls[0]?.options?.model}`);
             }
-            if (!/online/i.test(first.status)) throw new Error(`AI did not stay online: ${first.status}`);
+            const systemPrompt = first.chatCalls[0]?.messages?.[0]?.content || '';
+            if (!/Never sound ceremonial, archaic, robotic/i.test(systemPrompt)) {
+              throw new Error('Modern professional coaching policy is missing from the system prompt.');
+            }
+            if (!/professional ai.*ready/i.test(first.status)) throw new Error(`AI did not stay ready: ${first.status}`);
             if (first.error) throw new Error(`Unexpected visible AI error: ${first.error}`);
 
             // The live call button itself must still open the full-screen voice experience.
@@ -207,8 +244,18 @@ jobs:
             if (!live.active) throw new Error('Interpreter Live overlay did not open.');
             if (live.voiceStarts < 1) throw new Error('Interpreter Live did not start native voice input.');
 
+            await page.evaluate(() => window.__professionalVoiceSpeak('A concise professional test.', 'en-US'));
+            await page.waitForFunction(() => window.__ttsCalls.length === 1, null, { timeout: 5000 });
+            const voice = await page.evaluate(() => window.__ttsCalls[0]);
+            if (voice.options?.provider !== 'openai' || voice.options?.model !== 'gpt-4o-mini-tts') {
+              throw new Error(`Professional neural voice was not used: ${JSON.stringify(voice.options)}`);
+            }
+            if (!/present-day conference interpreter coach/i.test(voice.options?.instructions || '')) {
+              throw new Error('Professional voice direction is missing.');
+            }
+
             await browser.close();
-            console.log('Interpreter AI integration passed: AIV5-LIVE, visible voice controls, live overlay, first-turn Qwen activation, no manual auth.');
+            console.log('Interpreter AI integration passed: Qwen3.8 professional prompt, neural Studio voice, live overlay, first-turn activation and no manual auth.');
           })().catch(error => {
             console.error(error);
             process.exit(1);

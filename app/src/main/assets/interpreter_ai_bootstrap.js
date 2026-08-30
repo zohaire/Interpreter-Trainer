@@ -1,7 +1,8 @@
 (() => {
   if (window.__interpreterAiBootstrapV5) return 'ready';
   window.__interpreterAiBootstrapV5 = true;
-  window.__interpreterAiCoreVersion = 'AIV5-LIVE';
+  window.__interpreterAiBootstrapV6 = true;
+  window.__interpreterAiCoreVersion = 'AIV6-PRO';
 
   const byId = id => document.getElementById(id);
 
@@ -25,17 +26,17 @@
   // original user action so Android WebView retains transient activation for first-use auth.
   const providerReady = () => {
     if (navigator.onLine === false) {
-      setConnectionStatus('No internet connection · AIV5-LIVE', 'bad');
+      setConnectionStatus('Offline · reconnect to use AI', 'bad');
       setError('Interpreter AI needs an internet connection.');
       return false;
     }
     if (!sdkReady()) {
-      setConnectionStatus('AI service unavailable · AIV5-LIVE', 'bad');
+      setConnectionStatus('AI service unavailable', 'bad');
       setError('Interpreter AI could not load its online service. Check your connection and try again.');
       return false;
     }
 
-    setConnectionStatus('Online AI · ready · AIV5-LIVE', 'ok');
+    setConnectionStatus('Professional AI · ready', 'ok');
     setError('');
     return true;
   };
@@ -183,7 +184,7 @@
           const warmup = puter.ai.chat([
             { role:'system', content:'Initialize an interpreter-training voice session.' },
             { role:'user', content:'Reply only READY.' }
-          ], { model:'qwen/qwen3.6-27b', max_tokens:2, temperature:0 });
+          ], { model:window.__INTERPRETER_AI_MODEL || 'qwen/qwen3.8-27b:free', max_tokens:2, temperature:0 });
           await warmup;
         }
       } catch (error) {
@@ -317,14 +318,15 @@
     showTyping();
 
     try {
-      const system = `You are Interpreter AI, a fast professional coach for interpreters working especially in Arabic, English and French. Respond naturally and directly.\n\n${nativePracticeContext()}`;
+      const system = window.__buildInterpreterCoachPrompt?.({ voice: fromVoice }) ||
+        `You are Interpreter AI, a modern professional coach for interpreters. Respond directly in the user's language and never invent evidence.\n\n${nativePracticeContext()}`;
       const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
 
       // Invoke Puter NOW, before any await. This is the critical Android first-use auth fix.
       const request = puter.ai.chat(conversation, {
-        model:'qwen/qwen3.6-27b',
-        max_tokens: fromVoice ? 320 : 650,
-        temperature:0.24
+        model:window.__INTERPRETER_AI_MODEL || 'qwen/qwen3.8-27b:free',
+        max_tokens: fromVoice ? 220 : 760,
+        temperature:0.18
       });
       const response = await request;
       const answer = responseText(response);
@@ -335,12 +337,12 @@
       saveHistory();
       hideTyping();
       addMessage('assistant', answer);
-      setConnectionStatus('Online AI · ready · AIV5-LIVE', 'ok');
+      setConnectionStatus('Professional AI · ready', 'ok');
     } catch (error) {
       hideTyping();
       const message = error?.msg || error?.message || String(error);
       setError('Interpreter AI could not answer: ' + message);
-      setConnectionStatus('Request failed · AIV5-LIVE', 'bad');
+      setConnectionStatus('Request failed', 'bad');
     } finally {
       busy = false;
       updateSendState();
@@ -364,14 +366,23 @@
     if (result) result.innerHTML = '<div class="result-card"><div class="typing"><span></span><span></span><span></span></div></div>';
 
     try {
-      const prompt = `Mode: ${byId('mode')?.value || 'not specified'}\nDirection: ${byId('languages')?.value || 'not specified'}\nSource duration: ${byId('sourceSeconds')?.value || 'not provided'}\nTrainee duration: ${byId('traineeSeconds')?.value || 'not provided'}\n\nSOURCE:\n${source}\n\nTRAINEE:\n${trainee}\n\nEvaluate meaning transfer, omissions, additions, numbers, names, terminology, register, fluency and give three concrete drills.`;
+      const evaluationData = {
+        mode:byId('mode')?.value || '',
+        languages:byId('languages')?.value || '',
+        sourceSeconds:byId('sourceSeconds')?.value || '',
+        traineeSeconds:byId('traineeSeconds')?.value || '',
+        source,
+        trainee
+      };
+      const prompt = window.__buildInterpreterEvaluationRequest?.(evaluationData) ||
+        `SOURCE:\n${source}\n\nTRAINEE OUTPUT:\n${trainee}\n\nEvaluate meaning transfer, completeness, precision, terminology and register. Do not invent evidence.`;
       const request = puter.ai.chat([
-        { role:'system', content:'You are a rigorous professional interpreter-performance evaluator. Do not invent evidence.' },
+        { role:'system', content:window.__INTERPRETER_EVALUATION_SYSTEM || 'You are a rigorous professional interpreter-performance evaluator. Do not invent evidence.' },
         { role:'user', content:prompt }
       ], {
-        model:'qwen/qwen3.6-27b',
+        model:window.__INTERPRETER_AI_MODEL || 'qwen/qwen3.8-27b:free',
         max_tokens:1400,
-        temperature:0.15
+        temperature:0.10
       });
       const response = await request;
       const answer = responseText(response);
@@ -390,11 +401,11 @@
         card.append(head, body);
         result.appendChild(card);
       }
-      setConnectionStatus('Online AI · ready · AIV5-LIVE', 'ok');
+      setConnectionStatus('Professional AI · ready', 'ok');
     } catch (error) {
       const message = error?.msg || error?.message || String(error);
       if (result) result.innerHTML = '<div class="result-card error-box">Evaluation failed: ' + escapeHtml(message) + '</div>';
-      setConnectionStatus('Request failed · AIV5-LIVE', 'bad');
+      setConnectionStatus('Request failed', 'bad');
     } finally {
       busy = false;
       if (evaluateButton) evaluateButton.disabled = false;
@@ -406,14 +417,14 @@
   const refresh = () => {
     ensureVoiceUi();
     if (navigator.onLine === false) {
-      setConnectionStatus('No internet connection · AIV5-LIVE', 'bad');
+      setConnectionStatus('Offline · reconnect to use AI', 'bad');
       return;
     }
     if (!sdkReady()) {
-      setConnectionStatus('Loading AI service · AIV5-LIVE');
+      setConnectionStatus('Preparing professional AI…');
       return;
     }
-    setConnectionStatus('Online AI · ready · AIV5-LIVE', 'ok');
+    setConnectionStatus('Professional AI · ready', 'ok');
     setError('');
   };
 
@@ -426,7 +437,7 @@
 
   refresh();
   window.addEventListener('online', refresh);
-  window.addEventListener('offline', () => setConnectionStatus('No internet connection · AIV5-LIVE', 'bad'));
+  window.addEventListener('offline', () => setConnectionStatus('Offline · reconnect to use AI', 'bad'));
 
   return 'ready';
 })();

@@ -45,7 +45,7 @@ fun PrivacyScreen(onBack: () -> Unit) {
             )
             PrivacySection(
                 "Voice features",
-                "Android speech recognition may use your device's configured online speech service. Interpreter AI voice output may use Puter text-to-speech, with Android text-to-speech as a fallback."
+                "Android speech recognition may use your device's configured online speech service. When the device recognizer is unavailable, a voice turn may be sent through Puter for online transcription. AI reply text is sent through Puter for neural speech generation; Android text-to-speech is the fallback."
             )
             PrivacySection(
                 "Your control",

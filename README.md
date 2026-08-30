@@ -9,7 +9,9 @@ Interpreter Trainer is a production-oriented Android 12+ practice studio for Ara
 - Consecutive interpretation with 15, 30 or 60-second source segments
 - Three-language live transcription through Android speech recognition
 - Local practice history with transcripts, recordings, notes and feedback
-- Online Interpreter AI chat, evaluation and voice conversation through Puter/Qwen
+- Online Interpreter AI chat and evidence-based evaluation using Qwen3.8 27B through Puter
+- Interruptible Interpreter Live conversations with selectable Studio, Warm and Broadcast neural voices
+- Short, activation-safe streamed responses with device speech/transcription fallbacks
 - System, light and dark themes with a responsive Material 3 interface
 - Bluetooth, wired and external audio-route awareness
 
@@ -41,7 +43,7 @@ Target/compile SDK: 36
 
 ## Release channels
 
-Every pull request and push to `main` runs browser-level AI checks, Kotlin unit tests, Android lint, debug and optimized release builds, signature verification, and artifact upload. After all gates pass on `main`, the workflow creates a versioned preview tag and publishes a GitHub prerelease with an installable APK and an AAB.
+Every pull request and push to `main` verifies the live model catalog, professional prompt policy, neural voice configuration, first-turn authentication, voice interruption state machine, Kotlin unit tests, Android lint, debug and optimized release builds, signature verification, and artifact upload. After all gates pass on `main`, the workflow creates a versioned preview tag and publishes a GitHub prerelease with an installable APK and an AAB.
 
 GitHub preview packages use the repository's public, stable preview key so testers can install updates. That key is intentionally not a Play production key and must never be used for a store production release. The Play handoff is documented in [docs/PLAY_STORE_RELEASE.md](docs/PLAY_STORE_RELEASE.md).
 

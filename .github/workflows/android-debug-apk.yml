@@ -12,14 +12,14 @@ permissions:
 
 jobs:
   puter-ai-browser-test:
-    name: Verify Qwen, AI5 and Interpreter Live
+    name: Verify professional AI and Interpreter Live
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify live Puter model catalog contains Qwen3.6 27B
+      - name: Verify live Puter model catalog contains Qwen3.8 27B Free
         shell: bash
         run: |
           set -euo pipefail
@@ -27,8 +27,8 @@ jobs:
             https://api.puter.com/puterai/chat/models/details \
             --output /tmp/puter-models.json
           test -s /tmp/puter-models.json
-          grep -q 'qwen/qwen3.6-27b' /tmp/puter-models.json
-          echo "Qwen3.6 27B is present in Puter's live catalog."
+          grep -q 'qwen/qwen3.8-27b:free' /tmp/puter-models.json
+          echo "Qwen3.8 27B Free is present in Puter's live catalog."
 
       - name: Set up Node 22
         uses: actions/setup-node@v4
@@ -39,14 +39,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node --check app/src/main/assets/interpreter_professional_ai.js
           node --check app/src/main/assets/interpreter_ai_bootstrap.js
           node --check app/src/main/assets/interpreter_fast_voice.js
+          node --check app/src/main/assets/interpreter_professional_voice.js
           node --check app/src/main/assets/interpreter_precise_barge_in.js
           node --check app/src/main/assets/interpreter_live_latency.js
           node --check app/src/main/assets/interpreter_standard_arabic.js
           grep -q '__interpreterAiBootstrapV5' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q '__fastInterpreterVoiceV4' app/src/main/assets/interpreter_fast_voice.js
-          grep -q 'Online AI · ready · AIV5-LIVE' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'Professional AI · ready' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q '__professionalInterpreterVoiceV1' app/src/main/assets/interpreter_professional_voice.js
           grep -q 'voiceCallLaunch' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q 'voiceCallOverlay' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q 'voiceBtn' app/src/main/assets/interpreter_ai_bootstrap.js
@@ -137,7 +140,7 @@ jobs:
           cd /tmp/puter-ci
           node barge-test.cjs
 
-      - name: Verify AI5 first-turn activation and Interpreter Live UI
+      - name: Verify professional AI first-turn activation and Interpreter Live UI
         shell: bash
         run: |
           set -euo pipefail
@@ -164,7 +167,7 @@ jobs:
                   window.puter = {
                     auth: {
                       isSignedIn(){ return window.__mockSigned; },
-                      signIn(){ window.__signInCalls += 1; throw new Error('Manual signIn is forbidden in Android AI5'); }
+                      signIn(){ window.__signInCalls += 1; throw new Error('Manual signIn is forbidden in the Android coach'); }
                     },
                     ai: {
                       chat(messages, options){
@@ -199,23 +202,31 @@ jobs:
             });
 
             await page.addScriptTag({
+              path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_professional_ai.js')
+            });
+            await page.addScriptTag({
               path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_ai_bootstrap.js')
             });
             await page.addScriptTag({
               path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_fast_voice.js')
             });
+            await page.addScriptTag({
+              path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_professional_voice.js')
+            });
 
             const ready = await page.evaluate(() => ({
               bootstrap:Boolean(window.__interpreterAiBootstrapV5),
               voice:Boolean(window.__fastInterpreterVoiceV4),
+              professionalAi:Boolean(window.__interpreterProfessionalAiV1),
+              professionalVoice:Boolean(window.__professionalInterpreterVoiceV1),
               status:document.getElementById('statusText')?.textContent || '',
               mic:Boolean(document.getElementById('voiceBtn')),
               live:Boolean(document.getElementById('voiceCallLaunch')),
               overlay:Boolean(document.getElementById('voiceCallOverlay'))
             }));
-            if (!ready.bootstrap || !ready.voice) throw new Error('AI5/voice layers did not load.');
+            if (!ready.bootstrap || !ready.voice || !ready.professionalAi || !ready.professionalVoice) throw new Error('Professional AI/voice layers did not load.');
             if (!ready.mic || !ready.live || !ready.overlay) throw new Error('Interpreter Live or microphone controls are missing.');
-            if (!/AIV5-LIVE/i.test(ready.status)) throw new Error(`AI5-LIVE build marker missing: ${ready.status}`);
+            if (!/Professional AI.*ready/i.test(ready.status)) throw new Error(`Professional AI status missing: ${ready.status}`);
 
             await page.fill('#chatInput', 'Confirm AI works.');
             await page.click('#sendBtn');
@@ -225,11 +236,11 @@ jobs:
               signInCalls:window.__signInCalls,
               visible:Array.from(document.querySelectorAll('.message.assistant .bubble')).map(n => n.textContent || '')
             }));
-            if (result.signInCalls !== 0) throw new Error('Android AI5 used manual signIn.');
+            if (result.signInCalls !== 0) throw new Error('Android coach used manual signIn.');
             if (!result.chatCalls[0]?.userActivation) {
               throw new Error('First Qwen request lost transient user activation before Puter authentication.');
             }
-            if (result.chatCalls[0]?.options?.model !== 'qwen/qwen3.6-27b') {
+            if (result.chatCalls[0]?.options?.model !== 'qwen/qwen3.8-27b:free') {
               throw new Error(`Wrong model: ${result.chatCalls[0]?.options?.model}`);
             }
             if (!result.visible.some(text => text.includes('INTERPRETER_AI_OK'))) {
@@ -246,7 +257,7 @@ jobs:
             if (liveResult.starts < 1) throw new Error('Interpreter Live did not start native microphone input.');
 
             await browser.close();
-            console.log('Android AI5-LIVE first-turn and voice-control test passed.');
+            console.log('Android professional AI first-turn and voice-control test passed.');
           })().catch(err => { console.error(err); process.exit(1); });
           NODE
 
@@ -291,8 +302,10 @@ jobs:
         run: |
           set -euo pipefail
           test -f app/src/main/assets/interpreter_coach.html
+          test -f app/src/main/assets/interpreter_professional_ai.js
           test -f app/src/main/assets/interpreter_ai_bootstrap.js
           test -f app/src/main/assets/interpreter_fast_voice.js
+          test -f app/src/main/assets/interpreter_professional_voice.js
           test -f app/src/main/assets/interpreter_precise_barge_in.js
           test -f app/src/main/assets/interpreter_standard_arabic.js
           test -f app/src/main/java/com/interpretertrainer/app/speech/MicrophoneSessionCoordinator.kt
@@ -308,12 +321,13 @@ jobs:
           fi
 
           grep -q "https://js.puter.com/v2/" app/src/main/assets/interpreter_coach.html
-          grep -q "qwen/qwen3.6-27b" app/src/main/assets/interpreter_coach.html
+          grep -q "qwen/qwen3.8-27b:free" app/src/main/assets/interpreter_coach.html
           grep -q "puter.ai.txt2speech" app/src/main/assets/interpreter_coach.html
           grep -q "playNaturalInterpreterVoice" app/src/main/assets/interpreter_coach.html
           grep -q "__interpreterAiBootstrapV5" app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q "__fastInterpreterVoiceV4" app/src/main/assets/interpreter_fast_voice.js
-          grep -q "AIV5-LIVE" app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q "AIV6-PRO" app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q "gpt-4o-mini-tts" app/src/main/assets/interpreter_professional_voice.js
           grep -q "voiceCallLaunch" app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q "voiceCallOverlay" app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q "voiceBtn" app/src/main/assets/interpreter_ai_bootstrap.js
@@ -333,9 +347,10 @@ jobs:
           grep -q "MicrophoneSessionCoordinator" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q "NaturalAndroidVoice" app/src/main/java/com/interpretertrainer/app/ui/screens/ShadowingScreen.kt
           grep -q "NaturalAndroidVoice" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q "interpreter_precise_barge_in.js" app/src/main/java/com/interpretertrainer/app/ui/screens/ResponsiveAiCoachScreen.kt
+          grep -q "interpreter_precise_barge_in.js" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q "interpreter_professional_voice.js" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
 
-          echo "Interpreter AI5-LIVE, microphone coordination and natural voice guards passed."
+          echo "Interpreter professional AI, microphone coordination and neural voice guards passed."
 
       - name: Run unit tests and Android lint
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug

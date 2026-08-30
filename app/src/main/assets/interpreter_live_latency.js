@@ -182,9 +182,9 @@
   // ---------------------------------------------------------------------------
   let onlineVoiceAudio = null;
   const onlineProfiles = {
-    'en-US': { provider:'openai', model:'gpt-4o-mini-tts', voice:'alloy', response_format:'mp3', instructions:'Natural, concise interpreter-coach voice. Speak the supplied text in its original language.' },
-    'fr-FR': { provider:'openai', model:'gpt-4o-mini-tts', voice:'coral', response_format:'mp3', instructions:'Natural French-speaking interpreter-coach voice. Keep pronunciation clear and conversational.' },
-    'ar-MA': { provider:'openai', model:'gpt-4o-mini-tts', voice:'alloy', response_format:'mp3', instructions:'Natural Modern Standard Arabic interpreter-coach voice. Keep pronunciation clear and conversational.' }
+    'en-US': { provider:'openai', model:'gpt-4o-mini-tts', voice:'coral', response_format:'mp3', instructions:'Natural contemporary English in a polished conference-interpreter coaching voice. Keep it warm, precise and conversational.' },
+    'fr-FR': { provider:'openai', model:'gpt-4o-mini-tts', voice:'coral', response_format:'mp3', instructions:'Parlez dans un français contemporain, naturel et précis, comme un coach professionnel en interprétation.' },
+    'ar-MA': { provider:'openai', model:'gpt-4o-mini-tts', voice:'coral', response_format:'mp3', instructions:'Speak in clear Modern Standard Arabic with natural phrasing and a present-day professional coaching tone.' }
   };
 
   window.__stopOnlineVoice = () => {

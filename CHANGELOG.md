@@ -1,5 +1,16 @@
 # Changelog
 
+## Professional experience update — 2026-08-30
+
+- Added restrained forward/back screen motion and single-top navigation to prevent duplicate destinations.
+- Reconnected the coach screen to the complete streaming, interruption and online transcription runtime that ships with the app.
+- Made coach “Use in…” actions open the selected practice mode immediately with the generated material loaded.
+- Upgraded the normal coach route to Qwen3.8 27B Free and added a modern, evidence-limited interpreter coaching policy.
+- Added Studio, Warm and Broadcast neural voice profiles through documented Puter/OpenAI TTS options, with Android fallback.
+- Added a loading-to-content transition, app-theme synchronization and frame-batched streaming/composer updates.
+- Removed the obsolete responsive WebView patching path and its Kotlin script-escaping shim.
+- Expanded CI to validate the current live model, professional prompt, neural voice options, first-turn authentication and actual Android runtime wiring.
+
 ## 1.0.0 preview series — 2026-08-28
 
 - Refined the home experience into a responsive interpretation studio.

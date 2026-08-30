@@ -2,6 +2,18 @@ name: Interpreter AI Integration
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - "app/src/main/assets/interpreter_coach.html"
+      - "app/src/main/assets/interpreter_professional_ai.js"
+      - "app/src/main/assets/interpreter_ai_bootstrap.js"
+      - "app/src/main/assets/interpreter_fast_voice.js"
+      - "app/src/main/assets/interpreter_professional_voice.js"
+      - "app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt"
+      - "app/build.gradle.kts"
+      - ".github/tests/interpreter-coach-startup.cjs"
+      - ".github/workflows/interpreter-ai-e2e.yml"
   push:
     branches: [ "main", "master" ]
     paths:

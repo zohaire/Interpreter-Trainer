@@ -18,7 +18,7 @@ val hasReleaseSigning = listOf(
 
 android {
     namespace = "com.interpretertrainer.app"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.interpretertrainer.app"

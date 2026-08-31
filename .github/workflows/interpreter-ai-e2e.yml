@@ -51,9 +51,13 @@ jobs:
           grep -q 'voiceBtn' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q '__fastInterpreterVoiceV4' app/src/main/assets/interpreter_fast_voice.js
           grep -q '__loadInterpreterAiSdk' app/src/main/assets/interpreter_coach.html
-          grep -q 'WebViewAssetLoader' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q 'loadDataWithBaseURL' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q 'runtimeAssets.html' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'onPageCommitVisible' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q 'COACH_STARTUP_TIMEOUT_MS' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          if grep -q 'COACH_STARTUP_TIMEOUT_MS\|alpha(webAlpha)' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt; then
+            echo 'The bundled coach must not be hidden behind a native readiness timeout.'
+            exit 1
+          fi
           if grep -q '<script src="https://js.puter.com/v2/' app/src/main/assets/interpreter_coach.html; then
             echo 'Puter must not block the local coach document during startup.'
             exit 1

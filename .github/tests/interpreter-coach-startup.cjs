@@ -1,9 +1,22 @@
 const { chromium } = require('playwright');
+const fs = require('fs');
+const path = require('path');
 
 const coachUrl = process.env.INTERPRETER_COACH_URL ||
   'http://127.0.0.1:8765/interpreter_coach.html';
 
 (async () => {
+  const androidSource = fs.readFileSync(
+    path.resolve('app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt'),
+    'utf8'
+  );
+  if (!androidSource.includes('loadDataWithBaseURL(') || !androidSource.includes('runtimeAssets.html')) {
+    throw new Error('Android must render the bundled coach HTML directly from memory.');
+  }
+  if (androidSource.includes('COACH_STARTUP_TIMEOUT_MS') || androidSource.includes('.alpha(webAlpha)')) {
+    throw new Error('The local coach must not be hidden behind a readiness callback or timeout.');
+  }
+
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
 

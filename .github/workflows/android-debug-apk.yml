@@ -346,9 +346,13 @@ jobs:
             exit 1
           fi
           grep -q "CoachChromeClient" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q "WebViewAssetLoader" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q "loadDataWithBaseURL" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q "runtimeAssets.html" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q "onPageCommitVisible" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q "COACH_STARTUP_TIMEOUT_MS" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          if grep -q "COACH_STARTUP_TIMEOUT_MS\|alpha(webAlpha)" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt; then
+            echo "The bundled coach must not be hidden behind a native readiness timeout."
+            exit 1
+          fi
           grep -q "mediaPlaybackRequiresUserGesture = false" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
 
           grep -q "android.speech.RecognitionService" app/src/main/AndroidManifest.xml

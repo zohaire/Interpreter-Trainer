@@ -25,7 +25,6 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -33,22 +32,18 @@ import android.widget.FrameLayout
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -56,13 +51,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.webkit.WebViewAssetLoader
 import com.interpretertrainer.app.BuildConfig
 import com.interpretertrainer.app.ai.AiPracticeBridge
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
@@ -71,7 +64,6 @@ import com.interpretertrainer.app.speech.InterpreterLiveNativeBridge
 import com.interpretertrainer.app.speech.MicrophoneSessionCoordinator
 import com.interpretertrainer.app.speech.NaturalAndroidVoice
 import com.interpretertrainer.app.viewmodel.SessionViewModel
-import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.util.Locale
 
@@ -158,19 +150,9 @@ private fun ActiveAiCoachScreen(
     val context = LocalContext.current
     val bridgeHolder = remember { mutableStateOf<PracticeContextBridge?>(null) }
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
-    val pageReady = remember { mutableStateOf(false) }
     val startupError = remember { mutableStateOf<String?>(null) }
-    val startupAttempt = remember { mutableStateOf(0) }
     val runtimeAssets = remember(context) { CoachRuntimeAssets.read(context) }
     val darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
-
-    LaunchedEffect(startupAttempt.value) {
-        delay(COACH_STARTUP_TIMEOUT_MS)
-        if (!pageReady.value && startupError.value == null) {
-            startupError.value =
-                "Interpreter AI took too long to open. Check your connection and try again."
-        }
-    }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -213,12 +195,6 @@ private fun ActiveAiCoachScreen(
     }
 
     TrainerScaffold("Interpreter AI", onBack) { padding ->
-        val webAlpha by animateFloatAsState(
-            targetValue = if (pageReady.value) 1f else 0f,
-            animationSpec = tween(durationMillis = 180),
-            label = "coach content fade"
-        )
-
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -226,8 +202,7 @@ private fun ActiveAiCoachScreen(
         ) {
             AndroidView(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(webAlpha),
+                    .fillMaxSize(),
                 factory = { webContext ->
                     createCoachWebView(
                         context = webContext,
@@ -235,12 +210,10 @@ private fun ActiveAiCoachScreen(
                         liveBridge = liveBridge,
                         runtimeAssets = runtimeAssets,
                         darkTheme = darkTheme,
-                        onPageReady = {
+                        onPageLoaded = {
                             startupError.value = null
-                            pageReady.value = true
                         },
                         onPageError = { message ->
-                            pageReady.value = false
                             startupError.value = message
                         }
                     ).also { webViewRef.value = it }
@@ -250,64 +223,47 @@ private fun ActiveAiCoachScreen(
                 }
             )
 
+            val error = startupError.value
             AnimatedVisibility(
-                visible = !pageReady.value,
+                visible = error != null,
                 enter = fadeIn(),
-                exit = fadeOut(animationSpec = tween(160))
+                exit = fadeOut()
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val error = startupError.value
-                    if (error == null) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            "Interpreter AI couldn't open",
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            error.orEmpty(),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(20.dp))
+                        Button(
+                            onClick = {
+                                startupError.value = null
+                                webViewRef.value?.let { loadCoachPage(it, runtimeAssets.html) }
+                            },
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            CircularProgressIndicator()
-                            Spacer(Modifier.height(16.dp))
-                            Text(
-                                "Preparing your professional coach…",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text("Try again")
                         }
-                    } else {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 28.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
+                        OutlinedButton(
+                            onClick = onBack,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                "Interpreter AI couldn't open",
-                                style = MaterialTheme.typography.titleLarge
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                error,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(20.dp))
-                            Button(
-                                onClick = {
-                                    pageReady.value = false
-                                    startupError.value = null
-                                    startupAttempt.value += 1
-                                    webViewRef.value?.let(::loadCoachPage)
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Try again")
-                            }
-                            OutlinedButton(
-                                onClick = onBack,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Back to practice")
-                            }
+                            Text("Back to practice")
                         }
                     }
                 }
@@ -623,10 +579,12 @@ private class PracticeContextBridge(
 }
 
 private data class CoachRuntimeAssets(
+    val html: String,
     val scripts: List<String>
 ) {
     companion object {
         fun read(context: Context): CoachRuntimeAssets = CoachRuntimeAssets(
+            html = context.readAssetText("interpreter_coach.html"),
             scripts = listOf(
                 "interpreter_professional_ai.js",
                 "interpreter_ai_bootstrap.js",
@@ -651,12 +609,9 @@ private fun createCoachWebView(
     liveBridge: InterpreterLiveNativeBridge,
     runtimeAssets: CoachRuntimeAssets,
     darkTheme: Boolean,
-    onPageReady: () -> Unit,
+    onPageLoaded: () -> Unit,
     onPageError: (String) -> Unit
 ): WebView {
-    val assetLoader = WebViewAssetLoader.Builder()
-        .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
-        .build()
     val webView = WebView(context)
     webView.layoutParams = ViewGroup.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -670,13 +625,6 @@ private fun createCoachWebView(
     webView.addJavascriptInterface(bridge, "InterpreterNative")
     webView.addJavascriptInterface(liveBridge, "InterpreterLiveNative")
     webView.webViewClient = object : WebViewClient() {
-        override fun shouldInterceptRequest(
-            view: WebView?,
-            request: WebResourceRequest
-        ): WebResourceResponse? =
-            assetLoader.shouldInterceptRequest(request.url)
-                ?: super.shouldInterceptRequest(view, request)
-
         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
             val uri = request?.url ?: return true
             if (!request.isForMainFrame) return false
@@ -689,7 +637,7 @@ private fun createCoachWebView(
 
         override fun onPageCommitVisible(view: WebView?, url: String?) {
             super.onPageCommitVisible(view, url)
-            if (isCoachOrigin(url?.let(Uri::parse))) onPageReady()
+            if (isCoachOrigin(url?.let(Uri::parse))) onPageLoaded()
         }
 
         override fun onReceivedError(
@@ -710,9 +658,7 @@ private fun createCoachWebView(
             super.onPageFinished(view, url)
             if (isCoachOrigin(url?.let(Uri::parse))) {
                 val coachView = view ?: return
-                // The local interface is usable now. Enhancements are best-effort and must never
-                // keep the native loading overlay on screen if a JavaScript callback stalls.
-                onPageReady()
+                onPageLoaded()
                 coachView.evaluateJavascript(coachEnhancementScript()) {
                     coachView.evaluateJavascript(runtimeInstallerScript(runtimeAssets.scripts)) {
                         coachView.evaluateJavascript(coachThemeScript(darkTheme), null)
@@ -728,13 +674,21 @@ private fun createCoachWebView(
         setAcceptThirdPartyCookies(webView, true)
     }
 
-    loadCoachPage(webView)
+    // The complete shell is bundled in the APK and is rendered from memory. It is never hidden
+    // behind a WebView lifecycle callback or a network timeout; only AI replies need the network.
+    loadCoachPage(webView, runtimeAssets.html)
     return webView
 }
 
-private fun loadCoachPage(webView: WebView) {
+private fun loadCoachPage(webView: WebView, html: String) {
     webView.stopLoading()
-    webView.loadUrl(COACH_URL)
+    webView.loadDataWithBaseURL(
+        COACH_URL,
+        html,
+        "text/html",
+        "UTF-8",
+        COACH_URL
+    )
 }
 
 /**
@@ -1374,7 +1328,6 @@ private class CoachChromeClient(private val context: Context) : WebChromeClient(
 
 private const val COACH_URL =
     "https://appassets.androidplatform.net/assets/interpreter_coach.html"
-private const val COACH_STARTUP_TIMEOUT_MS = 8_000L
 
 private fun isCoachOrigin(uri: Uri?): Boolean =
     uri?.scheme.equals("https", ignoreCase = true) &&

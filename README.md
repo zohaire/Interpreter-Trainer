@@ -10,7 +10,7 @@ Interpreter Trainer is a production-oriented Android 12+ practice studio for Ara
 - Three-language live transcription through Android speech recognition
 - Local practice history with transcripts, recordings, notes and feedback
 - Online Interpreter AI chat and evidence-based evaluation using Qwen3.8 27B through Puter
-- Non-blocking local coach startup with explicit timeout and retry recovery
+- Deterministic in-memory coach startup that is independent of online AI availability
 - Interruptible Interpreter Live conversations with selectable Studio, Warm and Broadcast neural voices
 - Short, activation-safe streamed responses with device speech/transcription fallbacks
 - System, light and dark themes with a responsive Material 3 interface

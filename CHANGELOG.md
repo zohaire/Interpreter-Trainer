@@ -1,5 +1,12 @@
 # Changelog
 
+## Deterministic Interpreter AI opening — 2026-08-31
+
+- Removed the native readiness gate that could cover a successfully bundled coach on some Android WebView implementations.
+- Rendered the complete coach HTML directly from APK memory while preserving a secure HTTPS base origin for Puter.
+- Limited the full-screen recovery state to genuine local document failures; slow or unavailable AI networking is now reported inside the already-open coach.
+- Added a regression guard that rejects any return of the callback-dependent alpha mask or startup timeout.
+
 ## Interpreter AI startup hotfix — 2026-08-30
 
 - Removed the remote Puter SDK from the coach document's blocking startup path.

@@ -302,17 +302,23 @@
 
     const errorNode = document.getElementById('chatError');
     if (errorNode) errorNode.textContent = '';
-    addMessage('user', text);
-    input.value = '';
-    resizeComposer();
-    updateSendState();
-
-    if (ensureConnected() === false) {
-      if (window.__voiceCallActive) setCallStatus('Connection failed', 'Unable to reach Interpreter AI.');
+    // Invoke the provider connection directly inside the original Send/voice gesture. Do not clear
+    // the text until authentication succeeds, otherwise a blocked popup silently loses the turn.
+    const connection = window.__connectInterpreterAi?.();
+    try {
+      if (!connection?.then) throw new Error('The AI connection layer is still loading.');
+      await connection;
+    } catch (error) {
+      const message = window.InterpreterAiProvider?.messageForError?.(error) || error?.message || String(error);
+      if (errorNode) errorNode.textContent = message;
+      if (window.__voiceCallActive) setCallStatus('Connection failed', message);
       return;
     }
 
     busy = true;
+    addMessage('user', text);
+    input.value = '';
+    resizeComposer();
     updateSendState();
     showTyping();
 
@@ -334,11 +340,12 @@
       const system = window.__buildInterpreterCoachPrompt?.({ voice: voiceResponse }) ||
         ('You are Interpreter AI, a modern professional coach for interpreters. Answer directly in the user\'s language and never invent evidence.\n\n' + nativePracticeContext());
       const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
-      const stream = await puter.ai.chat(conversation, {
+      const stream = await window.InterpreterAiProvider.request(conversation, {
         model:window.__INTERPRETER_AI_MODEL || 'qwen/qwen3.8-27b:free',
         stream:true,
         max_tokens:voiceResponse ? 220 : 760,
-        temperature:0.18
+        temperature:0.18,
+        normalize:true
       });
 
       if (responseId !== state.responseId) throw { __interrupted:true };
@@ -348,7 +355,7 @@
       document.getElementById('messages').appendChild(streamRow);
       const bubble = streamRow.querySelector('.bubble');
 
-      for await (const part of stream) {
+      for await (const part of window.InterpreterAiProvider.streamParts(stream)) {
         if (responseId !== state.responseId) {
           try { await stream.return?.(); } catch (_) {}
           throw { __interrupted:true };
@@ -356,7 +363,8 @@
         if (part?.type === 'error') throw new Error(part?.error?.message || part?.message || 'Streaming request failed.');
         const chunk = typeof part === 'string' ? part :
           (typeof part?.text === 'string' ? part.text :
-            (typeof part?.delta?.content === 'string' ? part.delta.content : ''));
+            (typeof part?.delta?.content === 'string' ? part.delta.content :
+              (typeof part?.message?.content === 'string' ? part.message.content : '')));
         if (!chunk) continue;
         answer += chunk;
         state.streamAnswer = answer;
@@ -378,7 +386,7 @@
       history = history.slice(-16);
       saveHistory();
       addMessage('assistant', answer);
-      setStatus('Professional AI · ready · LIVE6', 'ok');
+      setStatus('Professional AI · connected · LIVE6', 'ok');
       window.__voiceAutoSpeak = false;
       window.__voiceOneShot = false;
       pumpSpeech();
@@ -393,9 +401,14 @@
       state.queue = [];
       state.speaking = false;
       state.streamComplete = true;
-      const message = error?.msg || error?.message || String(error);
+      const message = window.InterpreterAiProvider?.messageForError?.(error) ||
+        error?.msg || error?.message || String(error);
       if (errorNode) errorNode.textContent = 'Interpreter AI could not answer: ' + message;
       setStatus('Request failed · LIVE6', 'bad');
+      if (input && !input.value.trim()) {
+        input.value = text;
+        resizeComposer();
+      }
       if (window.__voiceCallActive) {
         setCallStatus('Something went wrong', message);
         scheduleNormalListening(120);

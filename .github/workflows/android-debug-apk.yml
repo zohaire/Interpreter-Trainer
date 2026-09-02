@@ -40,6 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check app/src/main/assets/interpreter_professional_ai.js
+          node --check app/src/main/assets/interpreter_ai_provider.js
           node --check app/src/main/assets/interpreter_ai_bootstrap.js
           node --check app/src/main/assets/interpreter_fast_voice.js
           node --check app/src/main/assets/interpreter_professional_voice.js
@@ -48,7 +49,9 @@ jobs:
           node --check app/src/main/assets/interpreter_standard_arabic.js
           grep -q '__interpreterAiBootstrapV5' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q '__fastInterpreterVoiceV4' app/src/main/assets/interpreter_fast_voice.js
-          grep -q 'Professional AI · ready' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'Professional AI · connected' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'connectFromUserGesture' app/src/main/assets/interpreter_ai_provider.js
+          grep -q 'attempt_temp_user_creation' app/src/main/assets/interpreter_ai_provider.js
           grep -q '__professionalInterpreterVoiceV1' app/src/main/assets/interpreter_professional_voice.js
           grep -q 'voiceCallLaunch' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q 'voiceCallOverlay' app/src/main/assets/interpreter_ai_bootstrap.js
@@ -57,6 +60,10 @@ jobs:
             echo 'Interpreter AI must not await readiness before its first Puter request.'
             exit 1
           fi
+
+      - name: Test provider authentication recovery and timeouts
+        shell: bash
+        run: node .github/tests/interpreter-ai-provider.cjs
 
       - name: Install headless Chromium
         working-directory: /tmp
@@ -163,11 +170,17 @@ jobs:
                 body: `
                   window.__chatCalls = [];
                   window.__signInCalls = 0;
+                  window.__signInActivation = false;
                   window.__mockSigned = false;
                   window.puter = {
                     auth: {
                       isSignedIn(){ return window.__mockSigned; },
-                      signIn(){ window.__signInCalls += 1; throw new Error('Manual signIn is forbidden in the Android coach'); }
+                      signIn(){
+                        window.__signInCalls += 1;
+                        window.__signInActivation = Boolean(navigator.userActivation?.isActive);
+                        window.__mockSigned = true;
+                        return Promise.resolve({ success:true });
+                      }
                     },
                     ai: {
                       chat(messages, options){
@@ -208,6 +221,9 @@ jobs:
               path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_professional_ai.js')
             });
             await page.addScriptTag({
+              path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_ai_provider.js')
+            });
+            await page.addScriptTag({
               path:path.join(process.env.GITHUB_WORKSPACE, 'app/src/main/assets/interpreter_ai_bootstrap.js')
             });
             await page.addScriptTag({
@@ -219,6 +235,7 @@ jobs:
 
             const ready = await page.evaluate(() => ({
               bootstrap:Boolean(window.__interpreterAiBootstrapV5),
+              provider:Boolean(window.__interpreterAiProviderV1),
               voice:Boolean(window.__fastInterpreterVoiceV4),
               professionalAi:Boolean(window.__interpreterProfessionalAiV1),
               professionalVoice:Boolean(window.__professionalInterpreterVoiceV1),
@@ -227,9 +244,9 @@ jobs:
               live:Boolean(document.getElementById('voiceCallLaunch')),
               overlay:Boolean(document.getElementById('voiceCallOverlay'))
             }));
-            if (!ready.bootstrap || !ready.voice || !ready.professionalAi || !ready.professionalVoice) throw new Error('Professional AI/voice layers did not load.');
+            if (!ready.bootstrap || !ready.provider || !ready.voice || !ready.professionalAi || !ready.professionalVoice) throw new Error('Professional AI/provider/voice layers did not load.');
             if (!ready.mic || !ready.live || !ready.overlay) throw new Error('Interpreter Live or microphone controls are missing.');
-            if (!/Professional AI.*ready/i.test(ready.status)) throw new Error(`Professional AI status missing: ${ready.status}`);
+            if (!/tap Connect AI/i.test(ready.status)) throw new Error(`Professional AI connection prompt missing: ${ready.status}`);
 
             await page.fill('#chatInput', 'Confirm AI works.');
             await page.click('#sendBtn');
@@ -237,12 +254,11 @@ jobs:
             const result = await page.evaluate(() => ({
               chatCalls:window.__chatCalls,
               signInCalls:window.__signInCalls,
+              signInActivation:window.__signInActivation,
               visible:Array.from(document.querySelectorAll('.message.assistant .bubble')).map(n => n.textContent || '')
             }));
-            if (result.signInCalls !== 0) throw new Error('Android coach used manual signIn.');
-            if (!result.chatCalls[0]?.userActivation) {
-              throw new Error('First Qwen request lost transient user activation before Puter authentication.');
-            }
+            if (result.signInCalls !== 1) throw new Error(`Expected one explicit signIn call, got ${result.signInCalls}.`);
+            if (!result.signInActivation) throw new Error('Puter signIn lost transient user activation.');
             if (result.chatCalls[0]?.options?.model !== 'qwen/qwen3.8-27b:free') {
               throw new Error(`Wrong model: ${result.chatCalls[0]?.options?.model}`);
             }
@@ -306,6 +322,7 @@ jobs:
           set -euo pipefail
           test -f app/src/main/assets/interpreter_coach.html
           test -f app/src/main/assets/interpreter_professional_ai.js
+          test -f app/src/main/assets/interpreter_ai_provider.js
           test -f app/src/main/assets/interpreter_ai_bootstrap.js
           test -f app/src/main/assets/interpreter_fast_voice.js
           test -f app/src/main/assets/interpreter_professional_voice.js
@@ -333,6 +350,8 @@ jobs:
           grep -q "puter.ai.txt2speech" app/src/main/assets/interpreter_coach.html
           grep -q "playNaturalInterpreterVoice" app/src/main/assets/interpreter_coach.html
           grep -q "__interpreterAiBootstrapV5" app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q "__interpreterAiProviderV1" app/src/main/assets/interpreter_ai_provider.js
+          grep -q "interpreter_ai_provider.js" app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q "__fastInterpreterVoiceV4" app/src/main/assets/interpreter_fast_voice.js
           grep -q "AIV6-PRO" app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q "gpt-4o-mini-tts" app/src/main/assets/interpreter_professional_voice.js

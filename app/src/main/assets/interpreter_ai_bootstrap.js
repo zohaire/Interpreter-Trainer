@@ -21,9 +21,10 @@
   };
 
   const sdkReady = () => Boolean(window.puter?.ai?.chat);
+  const provider = () => window.InterpreterAiProvider;
+  const providerError = error => provider()?.messageForError?.(error) ||
+    error?.msg || error?.message || String(error || 'Interpreter AI could not connect.');
 
-  // Deliberately synchronous: the first puter.ai.chat() invocation must still happen inside the
-  // original user action so Android WebView retains transient activation for first-use auth.
   const providerReady = () => {
     if (navigator.onLine === false) {
       setConnectionStatus('Offline · reconnect to use AI', 'bad');
@@ -36,15 +37,74 @@
       setError('Interpreter AI is still connecting. Please try again in a moment.');
       return false;
     }
+    if (window.puter?.auth?.isSignedIn?.() !== true) {
+      setConnectionStatus('AI ready · tap Connect AI');
+      return false;
+    }
 
-    setConnectionStatus('Professional AI · ready', 'ok');
+    setConnectionStatus('Professional AI · connected', 'ok');
     setError('');
     return true;
   };
 
-  window.connectAi = providerReady;
-  window.ensureConnected = providerReady;
-  window.__connectInterpreterAi = providerReady;
+  // Call this directly from the original button tap. The provider invokes Puter signIn() before
+  // its first await, which is required for Android WebView to permit the secure popup.
+  const connectFromTap = () => {
+    const runtime = provider();
+    if (!runtime) {
+      const error = new Error('The AI connection layer is still loading.');
+      error.code = 'SDK_NOT_READY';
+      return Promise.reject(error);
+    }
+    return runtime.connectFromUserGesture();
+  };
+  window.connectAi = connectFromTap;
+  window.ensureConnected = connectFromTap;
+  window.__connectInterpreterAi = connectFromTap;
+
+  const installConnectionUi = () => {
+    const header = document.querySelector('.topline');
+    if (!header || byId('connectAiBtn')) return;
+    const style = document.createElement('style');
+    style.id = 'interpreter-ai-connection-style';
+    style.textContent = `
+      .connect-ai-btn{border:1px solid color-mix(in srgb,var(--accent) 40%,var(--border));border-radius:999px;padding:7px 11px;background:var(--accent-soft);color:var(--accent-ink);font-size:11px;font-weight:780;white-space:nowrap}
+      .connect-ai-btn[hidden]{display:none}.connect-ai-btn:disabled{opacity:.58}
+    `;
+    document.head.appendChild(style);
+    const button = document.createElement('button');
+    button.id = 'connectAiBtn';
+    button.type = 'button';
+    button.className = 'connect-ai-btn';
+    button.textContent = 'Connect AI';
+    button.onclick = () => {
+      setError('');
+      const connection = connectFromTap();
+      connection.catch(error => setError(providerError(error)));
+    };
+    header.insertBefore(button, header.lastElementChild);
+  };
+
+  const renderProviderState = value => {
+    installConnectionUi();
+    const button = byId('connectAiBtn');
+    if (button) {
+      button.hidden = value.state === 'ready';
+      button.disabled = value.state === 'connecting' || value.state === 'offline';
+      button.textContent = value.state === 'loading' || value.state === 'error' ? 'Try again' :
+        value.state === 'connecting' ? 'Connecting…' : 'Connect AI';
+    }
+    if (value.state === 'ready') setConnectionStatus('Professional AI · connected', 'ok');
+    else if (value.state === 'offline') setConnectionStatus('Offline · reconnect to use AI', 'bad');
+    else if (value.state === 'error') setConnectionStatus('AI connection needs attention', 'bad');
+    else if (value.state === 'connecting') setConnectionStatus('Complete secure AI sign-in…');
+    else if (value.state === 'needs_auth') setConnectionStatus('AI ready · tap Connect AI');
+    else setConnectionStatus('Loading professional AI…');
+    window.updateSendState?.();
+  };
+
+  installConnectionUi();
+  provider()?.subscribe?.(renderProviderState);
 
   // The native Android page normally installs these controls from AiCoachScreen.onPageFinished().
   // Some WebView reload races can skip that callback. Rebuild the complete visible voice shell here
@@ -172,25 +232,16 @@
       callStatus('Connecting…', 'Preparing Interpreter AI and microphone');
       setOrbState(null);
 
-      if (providerReady() === false) {
-        callStatus('Connection failed', 'Check your internet connection and try again.');
-        return;
-      }
-
-      // Voice recognition callbacks are not browser user gestures. Authenticate/warm the provider
-      // while the user is still inside the Interpreter Live button tap, then start the microphone.
+      // Start authentication immediately inside this tap; do not put an await before this call.
+      const connection = connectFromTap();
       try {
-        const signedIn = window.puter?.auth?.isSignedIn?.() === true;
-        if (!signedIn) {
-          const warmup = puter.ai.chat([
-            { role:'system', content:'Initialize an interpreter-training voice session.' },
-            { role:'user', content:'Reply only READY.' }
-          ], { model:window.__INTERPRETER_AI_MODEL || 'qwen/qwen3.8-27b:free', max_tokens:2, temperature:0 });
-          await warmup;
-        }
+        await connection;
       } catch (error) {
-        callStatus('Connection failed', error?.message || 'Interpreter AI authentication could not complete.');
+        const message = providerError(error);
+        callStatus('Connection failed', message);
+        setError(message);
         window.__voiceCallActive = false;
+        window.__voiceAutoSpeak = false;
         return;
       }
 
@@ -307,14 +358,20 @@
     if (!text) return;
 
     setError('');
+    // Begin sign-in synchronously inside the Send tap. Keep the text in the composer until the
+    // connection succeeds so a blocked/cancelled popup never discards the user's message.
+    const connection = connectFromTap();
+    try {
+      await connection;
+    } catch (error) {
+      setError(providerError(error));
+      return;
+    }
+
+    busy = true;
     addMessage('user', text);
     input.value = '';
     resizeComposer();
-    updateSendState();
-
-    if (providerReady() === false) return;
-
-    busy = true;
     updateSendState();
     showTyping();
 
@@ -323,11 +380,11 @@
         `You are Interpreter AI, a modern professional coach for interpreters. Respond directly in the user's language and never invent evidence.\n\n${nativePracticeContext()}`;
       const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
 
-      // Invoke Puter NOW, before any await. This is the critical Android first-use auth fix.
-      const request = puter.ai.chat(conversation, {
+      const request = provider().request(conversation, {
         model:window.__INTERPRETER_AI_MODEL || 'qwen/qwen3.8-27b:free',
         max_tokens: fromVoice ? 220 : 760,
-        temperature:0.18
+        temperature:0.18,
+        normalize:true
       });
       const response = await request;
       const answer = responseText(response);
@@ -338,12 +395,16 @@
       saveHistory();
       hideTyping();
       addMessage('assistant', answer);
-      setConnectionStatus('Professional AI · ready', 'ok');
+      setConnectionStatus('Professional AI · connected', 'ok');
     } catch (error) {
       hideTyping();
-      const message = error?.msg || error?.message || String(error);
+      const message = providerError(error);
       setError('Interpreter AI could not answer: ' + message);
       setConnectionStatus('Request failed', 'bad');
+      if (input && !input.value.trim()) {
+        input.value = text;
+        resizeComposer();
+      }
     } finally {
       busy = false;
       updateSendState();
@@ -359,7 +420,13 @@
       if (result) result.innerHTML = '<div class="result-card error-box">Add both the source and your interpretation first.</div>';
       return;
     }
-    if (providerReady() === false) return;
+    const connection = connectFromTap();
+    try {
+      await connection;
+    } catch (error) {
+      if (result) result.innerHTML = '<div class="result-card error-box">' + escapeHtml(providerError(error)) + '</div>';
+      return;
+    }
 
     busy = true;
     const evaluateButton = byId('evaluateBtn');
@@ -377,13 +444,14 @@
       };
       const prompt = window.__buildInterpreterEvaluationRequest?.(evaluationData) ||
         `SOURCE:\n${source}\n\nTRAINEE OUTPUT:\n${trainee}\n\nEvaluate meaning transfer, completeness, precision, terminology and register. Do not invent evidence.`;
-      const request = puter.ai.chat([
+      const request = provider().request([
         { role:'system', content:window.__INTERPRETER_EVALUATION_SYSTEM || 'You are a rigorous professional interpreter-performance evaluator. Do not invent evidence.' },
         { role:'user', content:prompt }
       ], {
         model:window.__INTERPRETER_AI_MODEL || 'qwen/qwen3.8-27b:free',
         max_tokens:1400,
-        temperature:0.10
+        temperature:0.10,
+        normalize:true
       });
       const response = await request;
       const answer = responseText(response);
@@ -402,9 +470,9 @@
         card.append(head, body);
         result.appendChild(card);
       }
-      setConnectionStatus('Professional AI · ready', 'ok');
+      setConnectionStatus('Professional AI · connected', 'ok');
     } catch (error) {
-      const message = error?.msg || error?.message || String(error);
+      const message = providerError(error);
       if (result) result.innerHTML = '<div class="result-card error-box">Evaluation failed: ' + escapeHtml(message) + '</div>';
       setConnectionStatus('Request failed', 'bad');
     } finally {
@@ -417,16 +485,10 @@
 
   const refresh = () => {
     ensureVoiceUi();
-    if (navigator.onLine === false) {
-      setConnectionStatus('Offline · reconnect to use AI', 'bad');
-      return;
-    }
-    if (!sdkReady()) {
-      setConnectionStatus('Preparing professional AI…');
-      return;
-    }
-    setConnectionStatus('Professional AI · ready', 'ok');
-    setError('');
+    renderProviderState(provider()?.syncState?.() || {
+      state:navigator.onLine === false ? 'offline' : sdkReady() ? 'needs_auth' : 'loading'
+    });
+    if (providerReady()) setError('');
   };
 
   let refreshAttempts = 0;

@@ -587,6 +587,7 @@ private data class CoachRuntimeAssets(
             html = context.readAssetText("interpreter_coach.html"),
             scripts = listOf(
                 "interpreter_professional_ai.js",
+                "interpreter_ai_provider.js",
                 "interpreter_ai_bootstrap.js",
                 "interpreter_standard_arabic.js",
                 "interpreter_live_native_duplex.js",
@@ -715,6 +716,7 @@ private fun runtimeInstallerScript(scripts: List<String>): String {
             install();
             attempts += 1;
             const ready = window.__interpreterAiBootstrapV6 &&
+              window.__interpreterAiProviderV1 &&
               window.__fastInterpreterVoiceV5 &&
               window.__interpreterLiveLatencyV3 &&
               window.__professionalInterpreterVoiceV1;
@@ -1115,108 +1117,6 @@ private fun coachEnhancementScript(): String = """
   window.__interpreterPracticeObserver?.disconnect?.();
   window.__interpreterPracticeObserver = new MutationObserver(enhanceAssistantMessages);
   window.__interpreterPracticeObserver.observe(document.body, { childList:true, subtree:true });
-
-  window.sendChat = async function(fromVoice = false) {
-    if (busy) return;
-    const input = document.getElementById('chatInput');
-    const text = input?.value?.trim() || '';
-    if (!text) return;
-
-    document.getElementById('chatError').textContent = '';
-    addMessage('user', text);
-    input.value = '';
-    resizeComposer();
-    updateSendState();
-
-    if (!(await ensureConnected())) {
-      if (window.__voiceCallActive) callStatus('Connection failed', 'Unable to reach Interpreter AI.');
-      return;
-    }
-
-    busy = true;
-    updateSendState();
-    showTyping();
-
-    let streamRow = null;
-    let answer = '';
-    try {
-      const system = window.__buildInterpreterCoachPrompt?.({ voice:fromVoice }) ||
-        ('You are Interpreter AI, a modern professional coach for interpreters. Respond directly in the user\'s language and never invent evidence.\n\n' + nativePracticeContext());
-      const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
-      const stream = await puter.ai.chat(conversation, {
-        model:window.__INTERPRETER_AI_MODEL || 'qwen/qwen3.8-27b:free',
-        stream:true,
-        max_tokens:fromVoice ? 220 : 760,
-        temperature:0.18
-      });
-
-      hideTyping();
-      streamRow = messageElement('assistant', '');
-      streamRow.dataset.streaming = '1';
-      document.getElementById('messages').appendChild(streamRow);
-      const bubble = streamRow.querySelector('.bubble');
-
-      for await (const part of stream) {
-        if (part?.type === 'error') throw new Error(part?.error?.message || part?.message || 'Streaming request failed.');
-        const chunk = typeof part === 'string'
-          ? part
-          : (typeof part?.text === 'string'
-              ? part.text
-              : (typeof part?.delta?.content === 'string' ? part.delta.content : ''));
-        if (!chunk) continue;
-        answer += chunk;
-        if (bubble) bubble.textContent = answer;
-        requestAnimationFrame(scrollToBottom);
-      }
-
-      answer = answer.trim();
-      if (!answer) throw new Error('The AI returned an empty response.');
-      streamRow?.remove();
-      streamRow = null;
-
-      history.push({ role:'user', content:text }, { role:'assistant', content:answer });
-      history = history.slice(-16);
-      saveHistory();
-      addMessage('assistant', answer);
-      setStatus('Professional AI · ready', 'ok');
-
-      if (window.__voiceCallActive) {
-        callStatus('Interpreter AI is speaking', answer);
-        const callLang = document.getElementById('callVoiceLang')?.value || 'en-US';
-        const started = speakVoice(answer, callLang);
-        if (!started) {
-          callStatus('Your turn', 'Voice output is unavailable; listening again.');
-          setTimeout(() => scheduleListening(150), 0);
-        }
-      } else if (window.__voiceAutoSpeak || window.__voiceOneShot) {
-        const lang = document.getElementById('voiceLang')?.value || 'en-US';
-        speakVoice(answer, lang);
-      }
-
-      window.__voiceAutoSpeak = false;
-      window.__voiceOneShot = false;
-    } catch (error) {
-      hideTyping();
-      streamRow?.remove();
-      const message = error?.msg || error?.message || String(error);
-      document.getElementById('chatError').textContent = 'Interpreter AI could not answer: ' + message;
-      setStatus('Request failed', 'bad');
-      if (window.__voiceCallActive) {
-        callStatus('Something went wrong', message);
-        setTimeout(() => scheduleListening(450), 0);
-      }
-      window.__voiceAutoSpeak = false;
-      window.__voiceOneShot = false;
-    } finally {
-      busy = false;
-      updateSendState();
-      if (window.__voiceCallActive && !window.__voiceCallMuted && !window.__voiceAutoSpeak) {
-        const statusText = document.getElementById('voiceCallStatus')?.textContent || '';
-        if (statusText === 'Your turn' || statusText === 'Something went wrong') scheduleListening(350);
-      }
-      if (!window.__voiceCallActive) setTimeout(() => input?.focus(), 50);
-    }
-  };
 
   enhanceAssistantMessages();
 })();

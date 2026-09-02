@@ -7,24 +7,28 @@ on:
     paths:
       - "app/src/main/assets/interpreter_coach.html"
       - "app/src/main/assets/interpreter_professional_ai.js"
+      - "app/src/main/assets/interpreter_ai_provider.js"
       - "app/src/main/assets/interpreter_ai_bootstrap.js"
       - "app/src/main/assets/interpreter_fast_voice.js"
       - "app/src/main/assets/interpreter_professional_voice.js"
       - "app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt"
       - "app/build.gradle.kts"
       - ".github/tests/interpreter-coach-startup.cjs"
+      - ".github/tests/interpreter-ai-provider.cjs"
       - ".github/workflows/interpreter-ai-e2e.yml"
   push:
     branches: [ "main", "master" ]
     paths:
       - "app/src/main/assets/interpreter_coach.html"
       - "app/src/main/assets/interpreter_professional_ai.js"
+      - "app/src/main/assets/interpreter_ai_provider.js"
       - "app/src/main/assets/interpreter_ai_bootstrap.js"
       - "app/src/main/assets/interpreter_fast_voice.js"
       - "app/src/main/assets/interpreter_professional_voice.js"
       - "app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt"
       - "app/build.gradle.kts"
       - ".github/tests/interpreter-coach-startup.cjs"
+      - ".github/tests/interpreter-ai-provider.cjs"
       - ".github/workflows/interpreter-ai-e2e.yml"
 
 jobs:
@@ -39,13 +43,17 @@ jobs:
         run: |
           set -euo pipefail
           node --check app/src/main/assets/interpreter_professional_ai.js
+          node --check app/src/main/assets/interpreter_ai_provider.js
           node --check app/src/main/assets/interpreter_ai_bootstrap.js
           node --check app/src/main/assets/interpreter_fast_voice.js
           node --check app/src/main/assets/interpreter_professional_voice.js
           grep -q 'interpreter_ai_bootstrap.js' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q 'interpreter_ai_provider.js' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'interpreter_professional_voice.js' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'qwen/qwen3.8-27b:free' app/src/main/assets/interpreter_coach.html
-          grep -q 'Professional AI · ready' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'Professional AI · connected' app/src/main/assets/interpreter_ai_bootstrap.js
+          grep -q 'connectFromUserGesture' app/src/main/assets/interpreter_ai_provider.js
+          grep -q 'attempt_temp_user_creation' app/src/main/assets/interpreter_ai_provider.js
           grep -q 'voiceCallLaunch' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q 'voiceCallOverlay' app/src/main/assets/interpreter_ai_bootstrap.js
           grep -q 'voiceBtn' app/src/main/assets/interpreter_ai_bootstrap.js
@@ -62,14 +70,14 @@ jobs:
             echo 'Puter must not block the local coach document during startup.'
             exit 1
           fi
-          if grep -q 'auth.signIn' app/src/main/assets/interpreter_ai_bootstrap.js; then
-            echo 'The Android AI bootstrap must not manually sign in.'
-            exit 1
-          fi
           if grep -q 'await ensureConnected' app/src/main/assets/interpreter_fast_voice.js; then
             echo 'Interpreter AI must not await a readiness helper before the first Puter call.'
             exit 1
           fi
+
+      - name: Test provider authentication recovery and timeouts
+        shell: bash
+        run: node .github/tests/interpreter-ai-provider.cjs
 
       - name: Verify Qwen3.8 27B Free remains in Puter live catalog
         shell: bash
@@ -132,14 +140,17 @@ jobs:
                 body: `
                   window.__mockSigned = false;
                   window.__signInCalls = 0;
+                  window.__signInActivation = false;
                   window.__chatCalls = [];
                   window.__ttsCalls = [];
                   window.puter = {
                     auth: {
                       isSignedIn() { return window.__mockSigned === true; },
-                      async signIn() {
+                      signIn() {
                         window.__signInCalls += 1;
-                        throw new Error('Manual signIn must not be used by the Android AI path');
+                        window.__signInActivation = Boolean(navigator.userActivation?.isActive);
+                        window.__mockSigned = true;
+                        return Promise.resolve({ success:true });
                       }
                     },
                     ai: {
@@ -198,6 +209,12 @@ jobs:
             );
             await page.addScriptTag({ path: professionalAi });
 
+            const provider = path.join(
+              process.env.GITHUB_WORKSPACE,
+              'app/src/main/assets/interpreter_ai_provider.js'
+            );
+            await page.addScriptTag({ path: provider });
+
             const bootstrap = path.join(
               process.env.GITHUB_WORKSPACE,
               'app/src/main/assets/interpreter_ai_bootstrap.js'
@@ -222,6 +239,7 @@ jobs:
               chatCalls: window.__chatCalls.length,
               status: document.getElementById('statusText')?.textContent || '',
               bootstrapV5: Boolean(window.__interpreterAiBootstrapV5),
+              providerV1: Boolean(window.__interpreterAiProviderV1),
               fastVoiceV4: Boolean(window.__fastInterpreterVoiceV4),
               voiceUiRestored: Boolean(window.__voiceUiRestoredByBootstrapV5),
               professionalAi: Boolean(window.__interpreterProfessionalAiV1),
@@ -232,6 +250,7 @@ jobs:
               voiceProfile: Boolean(document.getElementById('voiceProfile'))
             }));
             if (!before.bootstrapV5) throw new Error('AI bootstrap V5 did not load.');
+            if (!before.providerV1) throw new Error('AI provider V1 did not load.');
             if (!before.fastVoiceV4) throw new Error('Fast Interpreter AI V4 did not load.');
             if (!before.professionalAi || !before.professionalVoice || !before.voiceProfile) {
               throw new Error('Professional AI prompt or neural voice layer did not load.');
@@ -241,7 +260,7 @@ jobs:
             }
             if (before.signInCalls !== 0) throw new Error('Manual authentication ran before a request.');
             if (before.chatCalls !== 0) throw new Error('AI generated a request before the user sent anything.');
-            if (!/professional ai.*ready/i.test(before.status)) throw new Error(`Unexpected initial AI status: ${before.status}`);
+            if (!/tap connect ai/i.test(before.status)) throw new Error(`Unexpected initial AI status: ${before.status}`);
 
             await page.fill('#chatInput', 'Confirm the interpreter coach works.');
             await page.click('#sendBtn');
@@ -254,16 +273,15 @@ jobs:
 
             const first = await page.evaluate(() => ({
               signInCalls: window.__signInCalls,
+              signInActivation: window.__signInActivation,
               chatCalls: window.__chatCalls,
               status: document.getElementById('statusText')?.textContent || '',
               error: document.getElementById('chatError')?.textContent || ''
             }));
 
-            if (first.signInCalls !== 0) throw new Error(`Manual signIn was called ${first.signInCalls} times.`);
+            if (first.signInCalls !== 1) throw new Error(`Expected one explicit signIn call, got ${first.signInCalls}.`);
+            if (!first.signInActivation) throw new Error('Puter signIn lost transient user activation.');
             if (first.chatCalls.length !== 1) throw new Error(`Expected one AI request, got ${first.chatCalls.length}.`);
-            if (!first.chatCalls[0].userActivation) {
-              throw new Error('The first puter.ai.chat call lost transient user activation before authentication could open.');
-            }
             if (first.chatCalls[0]?.options?.model !== 'qwen/qwen3.8-27b:free') {
               throw new Error(`Wrong AI model: ${first.chatCalls[0]?.options?.model}`);
             }
@@ -271,7 +289,7 @@ jobs:
             if (!/Never sound ceremonial, archaic, robotic/i.test(systemPrompt)) {
               throw new Error('Modern professional coaching policy is missing from the system prompt.');
             }
-            if (!/professional ai.*ready/i.test(first.status)) throw new Error(`AI did not stay ready: ${first.status}`);
+            if (!/professional ai.*connected/i.test(first.status)) throw new Error(`AI did not stay connected: ${first.status}`);
             if (first.error) throw new Error(`Unexpected visible AI error: ${first.error}`);
 
             // The live call button itself must still open the full-screen voice experience.
@@ -295,7 +313,7 @@ jobs:
             }
 
             await browser.close();
-            console.log('Interpreter AI integration passed: Qwen3.8 professional prompt, neural Studio voice, live overlay, first-turn activation and no manual auth.');
+            console.log('Interpreter AI integration passed: explicit activation-safe auth, Qwen3.8 professional prompt, neural Studio voice and live overlay.');
           })().catch(error => {
             console.error(error);
             process.exit(1);

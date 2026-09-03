@@ -1,11 +1,12 @@
 # Interpreter Trainer 1.0.0 Preview
 
-## Interpreter AI connection recovery
+## Interpreter AI freeze fix
 
-- Shows a truthful connection state and turns green only after Puter authentication succeeds.
-- Starts secure sign-in directly from the user's tap so Android WebView does not block the popup.
-- Keeps an unsent or failed message available for retry instead of silently discarding it.
-- Recovers from stalled request startup and interrupted streams instead of loading forever.
+- Fixes an infinite loop in Arabic language labels that could freeze the AI screen, sign-in, chat and voice controls.
+- Keeps Modern Standard Arabic labels and the existing Qwen model, coaching prompts and neural voice profiles.
+- Adds a regression test that loads every AI script in the Android app's exact order and checks three chat turns, conversation context, evaluation and voice controls.
+
+Provider authentication and AI generation require an internet connection. The UI regression tests simulate provider responses; they do not certify a user's live Puter session.
 
 This is the first production-readiness preview of the Arabic, English and French interpretation practice studio.
 

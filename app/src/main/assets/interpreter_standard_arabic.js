@@ -9,7 +9,11 @@
       const value = String(option.value || '').toLowerCase();
       const text = String(option.textContent || '').trim().toLowerCase();
       if (value === 'ar-ma' || value === 'ar-sa' || value === 'ar' || text === 'arabic' || text === 'العربية') {
-        option.textContent = option.closest('#callVoiceLang') ? 'العربية الفصحى' : 'AR · MSA';
+        const label = option.closest('#callVoiceLang') ? 'العربية الفصحى' : 'AR · MSA';
+        // Assigning textContent queues a childList mutation even when the text is unchanged.
+        // This observer watches the whole coach, so unconditional writes create an infinite
+        // microtask loop that prevents sign-in, chat, rendering and timers from running.
+        if (option.textContent !== label) option.textContent = label;
       }
     });
   };

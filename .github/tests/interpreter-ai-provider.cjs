@@ -142,7 +142,7 @@ function addNative(r, respond) {
   return { requests, cancelled };
 }
 
-async function testXhrRecoveryAndNextTurn() {
+async function testNativeFirstAndNextTurn() {
   const r = runtime({ signedIn: true, chat: () => Promise.reject(failedXhr()) });
   const native = addNative(r, send => {
     send('started');
@@ -157,7 +157,7 @@ async function testXhrRecoveryAndNextTurn() {
     for await (const part of provider.streamParts(response)) answer += part.text;
     assert.strictEqual(answer, 'Hello العالم');
   }
-  assert.strictEqual(r.calls.chat, 1, 'Subsequent messages should reuse native recovery instead of repeating broken XHR.');
+  assert.strictEqual(r.calls.chat, 0, 'Android must never enter SDK chat before the native request.');
   assert.strictEqual(native.requests.length, 2);
   assert.strictEqual(native.requests[0].auth_token, 'test-session-token');
   assert.strictEqual(native.requests[0].driver, 'ai-chat');
@@ -182,34 +182,46 @@ async function testNativeEvaluationAndCancellation() {
   assert.ok(native.cancelled.length > 0, 'A stalled native stream must be disconnected.');
 }
 
-async function testStreamNetworkRecoveryOnlyBeforeOutput() {
-  for (const partial of [false, true]) {
-    const r = runtime({ signedIn: true, chat: () => (async function* () {
-      if (partial) yield { text: 'Already visible' };
-      throw failedXhr();
-    })() });
-    const native = addNative(r, send => send('result', '{"result":{"message":{"content":"Recovered"}}}'));
-    const response = await r.window.InterpreterAiProvider.request([{ role: 'user', content: 'Hello' }], { stream: true });
-    const read = async () => {
-      const parts = [];
-      for await (const part of r.window.InterpreterAiProvider.streamParts(response)) parts.push(part);
-      return parts;
-    };
-    if (partial) {
-      await assert.rejects(read(), /could not be reached/);
-      assert.strictEqual(native.requests.length, 0, 'Never regenerate a reply after delivering partial output.');
-    } else {
-      assert.strictEqual((await read())[0].message.content, 'Recovered');
-      assert.strictEqual(native.requests.length, 1);
-    }
-  }
+async function testNativeStreamFailureIsNotReplayed() {
+  const r = runtime({ signedIn: true });
+  const native = addNative(r, send => {
+    send('started');
+    send('part', JSON.stringify({ text: 'Partial answer' }));
+    setTimeout(() => send('transport_error', 'NETWORK_ERROR'), 5);
+  });
+  const provider = r.window.InterpreterAiProvider;
+  const response = await provider.request([{ role: 'user', content: 'Hello' }], { stream: true });
+  const parts = [];
+  await assert.rejects(async () => {
+    for await (const part of provider.streamParts(response)) parts.push(part.text);
+  }, /could not be reached/);
+  assert.deepStrictEqual(parts, ['Partial answer']);
+  assert.strictEqual(native.requests.length, 1, 'Do not regenerate after partial output.');
+  assert.strictEqual(r.calls.chat, 0, 'A native error must not trigger a second SDK request.');
+}
+
+async function testStalledSdkCannotBlockAndroid() {
+  const r = runtime({ signedIn: true, chat: () => new Promise(() => {}) });
+  addNative(r, send => send('result', '{"result":{"message":{"content":"Actual transport result"}}}'));
+  const provider = r.window.InterpreterAiProvider;
+  assert.strictEqual(provider.getState().responseVerified, false, 'A saved token is not a successful reply.');
+  const pending = provider.request([{ role: 'user', content: 'Hello' }]);
+  assert.strictEqual(provider.syncState().state, 'requesting');
+  const result = await pending;
+  assert.strictEqual(result.message.content, 'Actual transport result');
+  assert.strictEqual(r.calls.chat, 0);
+  assert.strictEqual(provider.confirmResponse(''), false);
+  assert.strictEqual(provider.getState().responseVerified, false);
+  provider.confirmResponse(result.message.content);
+  assert.strictEqual(provider.getState().responseVerified, true);
+  provider.reportFailure(new Error('The next response was empty.'));
+  assert.strictEqual(provider.syncState().state, 'error');
+  assert.strictEqual(provider.getState().responseVerified, false);
 }
 
 async function testAccountFailuresAreNotRetried() {
   const expired = runtime({ signedIn: true, chat: () => Promise.reject({ status: 401, responseText: '{"error":{"code":"token_auth_failed"}}' }) });
-  const native = addNative(expired, () => {});
   await assert.rejects(expired.window.InterpreterAiProvider.request([], {}), /session has expired/);
-  assert.strictEqual(native.requests.length, 0, 'Do not retry authentication failures as network failures.');
   assert.strictEqual(expired.calls.signOut, 1);
   assert.strictEqual(expired.window.InterpreterAiProvider.getState().state, 'needs_auth');
   await expired.window.InterpreterAiProvider.connectFromUserGesture();
@@ -240,12 +252,13 @@ async function testStreamErrorsKeepTheirMeaning() {
   await testBlockedPopupIsRecoverable();
   await testSdkLoadingRequiresFreshTap();
   await testRequestAndStreamTimeouts();
-  await testXhrRecoveryAndNextTurn();
+  await testNativeFirstAndNextTurn();
   await testNativeEvaluationAndCancellation();
-  await testStreamNetworkRecoveryOnlyBeforeOutput();
+  await testNativeStreamFailureIsNotReplayed();
+  await testStalledSdkCannotBlockAndroid();
   await testAccountFailuresAreNotRetried();
   await testStreamErrorsKeepTheirMeaning();
-  console.log('Interpreter AI provider auth, XHR-to-native recovery, consecutive turns, evaluation, stream errors and cancellation passed.');
+  console.log('Interpreter AI provider auth, direct native transport, stalled SDK isolation, verified response state, consecutive turns, evaluation, stream errors and cancellation passed.');
 })().catch(error => {
   console.error(error);
   process.exit(1);

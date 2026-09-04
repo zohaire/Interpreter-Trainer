@@ -375,6 +375,7 @@
       if (responseId !== state.responseId) throw { __interrupted:true };
       answer = answer.trim();
       if (!answer) throw new Error('The AI returned an empty response.');
+      window.InterpreterAiProvider.confirmResponse(answer);
       state.streamAnswer = answer;
       state.streamComplete = true;
       if (voiceResponse) queueReadySpeech(true);
@@ -398,6 +399,7 @@
       pendingStreamText = '';
       streamRow?.remove();
       if (error?.__interrupted) return;
+      window.InterpreterAiProvider?.reportFailure?.(error);
       state.queue = [];
       state.speaking = false;
       state.streamComplete = true;

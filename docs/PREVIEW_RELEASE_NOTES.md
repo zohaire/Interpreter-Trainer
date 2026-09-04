@@ -1,12 +1,11 @@
 # Interpreter Trainer 1.0.0 Preview
 
-## Interpreter AI network recovery
+## Interpreter AI connection repair
 
-- Recovers from WebView's `[object XMLHttpRequest]` failure by retrying through Android HTTPS with the same Puter session and Qwen model.
-- Preserves streamed replies and reuses the native connection path for subsequent chat and evaluation requests.
-- Reports connection, secure-connection, expired-session, usage-limit and provider errors clearly. Expired sessions offer sign-in again without discarding the message.
-- Cancels stalled native streams and disconnects requests when the AI screen closes.
-- Adds native HTTP tests and full-page regressions for the reported XHR failure and consecutive recovered replies.
+- Android sends chat and evaluation directly through authenticated native HTTPS. A stalled browser SDK can no longer prevent the native request from starting.
+- A saved login now shows “Signed in · send a message.” The green “connected” indicator appears only after a nonempty AI answer or evaluation is received.
+- Request failures clear the verified status. Expired sessions offer sign-in again and retain the unsent message for retry.
+- Regression coverage includes a permanently stalled SDK, consecutive native replies, evaluation, stream cancellation, and expired-session recovery through the actual chat UI.
 
 ## Interpreter AI freeze fix
 

@@ -8,7 +8,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
-import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -18,30 +17,18 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
@@ -50,23 +37,27 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.interpretertrainer.app.BuildConfig
-import com.interpretertrainer.app.ai.NativeAiNetworkBridge
 import com.interpretertrainer.app.ai.AiPracticeBridge
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
-import com.interpretertrainer.app.privacy.AiPrivacyPreferences
-import com.interpretertrainer.app.speech.InterpreterLiveNativeBridge
 import com.interpretertrainer.app.speech.MicrophoneSessionCoordinator
 import com.interpretertrainer.app.speech.NaturalAndroidVoice
 import com.interpretertrainer.app.viewmodel.SessionViewModel
 import org.json.JSONObject
 import java.util.Locale
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.ui.unit.dp
+import com.interpretertrainer.app.privacy.AiPrivacyPreferences
 
 /**
  * Online Interpreter AI powered through Puter/Qwen.
@@ -124,7 +115,7 @@ private fun AiPrivacyDisclosure(onBack: () -> Unit, onAccept: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                "Voice recognition may use Android's configured speech service. If it is unavailable, one voice turn may be sent through Puter for online transcription. Spoken AI replies send the reply text through Puter for neural speech generation; Android text-to-speech is the fallback.",
+                "Voice recognition may use Android's configured speech service. Spoken AI replies send the reply text through Puter for neural speech generation; Android text-to-speech is the fallback.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
@@ -142,18 +133,11 @@ private fun AiPrivacyDisclosure(onBack: () -> Unit, onAccept: () -> Unit) {
 }
 
 @Composable
-private fun ActiveAiCoachScreen(
-    onBack: () -> Unit,
-    sessionViewModel: SessionViewModel,
-    onOpenPractice: (String) -> Unit
-) {
+private fun ActiveAiCoachScreen(onBack: () -> Unit, sessionViewModel: SessionViewModel, onOpenPractice: (String) -> Unit) {
     val sessions by sessionViewModel.sessions.collectAsState()
     val context = LocalContext.current
     val bridgeHolder = remember { mutableStateOf<PracticeContextBridge?>(null) }
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
-    val startupError = remember { mutableStateOf<String?>(null) }
-    val runtimeAssets = remember(context) { CoachRuntimeAssets.read(context) }
-    val darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -162,19 +146,10 @@ private fun ActiveAiCoachScreen(
     }
 
     val bridge = remember(context) {
-        PracticeContextBridge(
-            context = context.applicationContext,
-            requestMicrophonePermission = {
-                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            },
-            onOpenPractice = onOpenPractice
-        )
+        PracticeContextBridge(context.applicationContext, {
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }, onOpenPractice)
     }
-    val liveBridge = remember(context) {
-        InterpreterLiveNativeBridge(context.applicationContext)
-    }
-
-    val networkBridge = remember { NativeAiNetworkBridge() }
 
     SideEffect {
         bridgeHolder.value = bridge
@@ -184,14 +159,9 @@ private fun ActiveAiCoachScreen(
     DisposableEffect(Unit) {
         onDispose {
             bridge.dispose()
-            liveBridge.dispose()
-            networkBridge.dispose()
             webViewRef.value?.let { webView ->
                 runCatching { webView.stopLoading() }
                 runCatching { webView.removeJavascriptInterface("InterpreterNative") }
-                runCatching { webView.removeJavascriptInterface("InterpreterLiveNative") }
-                runCatching { webView.removeJavascriptInterface("InterpreterAiNetwork") }
-                runCatching { webView.loadUrl("about:blank") }
                 runCatching { webView.destroy() }
             }
             webViewRef.value = null
@@ -199,82 +169,18 @@ private fun ActiveAiCoachScreen(
         }
     }
 
-    TrainerScaffold("Interpreter AI", onBack) { padding ->
-        Box(
+    TrainerScaffold("Interpreter Coach", onBack) { padding ->
+        AndroidView(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-        ) {
-            AndroidView(
-                modifier = Modifier
-                    .fillMaxSize(),
-                factory = { webContext ->
-                    createCoachWebView(
-                        context = webContext,
-                        bridge = bridge,
-                        liveBridge = liveBridge,
-                        networkBridge = networkBridge,
-                        runtimeAssets = runtimeAssets,
-                        darkTheme = darkTheme,
-                        onPageLoaded = {
-                            startupError.value = null
-                        },
-                        onPageError = { message ->
-                            startupError.value = message
-                        }
-                    ).also { webViewRef.value = it }
-                },
-                update = { webView ->
-                    CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
-                }
-            )
-
-            val error = startupError.value
-            AnimatedVisibility(
-                visible = error != null,
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 28.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            "Interpreter AI couldn't open",
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            error.orEmpty(),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(20.dp))
-                        Button(
-                            onClick = {
-                                startupError.value = null
-                                webViewRef.value?.let { loadCoachPage(it, runtimeAssets.html) }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Try again")
-                        }
-                        OutlinedButton(
-                            onClick = onBack,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Back to practice")
-                        }
-                    }
-                }
+                .padding(padding),
+            factory = { webContext ->
+                createCoachWebView(webContext, bridge).also { webViewRef.value = it }
+            },
+            update = { webView ->
+                CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
             }
-        }
+        )
     }
 }
 
@@ -584,97 +490,29 @@ private class PracticeContextBridge(
     }
 }
 
-private data class CoachRuntimeAssets(
-    val html: String,
-    val scripts: List<String>
-) {
-    companion object {
-        fun read(context: Context): CoachRuntimeAssets = CoachRuntimeAssets(
-            html = context.readAssetText("interpreter_coach.html"),
-            scripts = listOf(
-                "interpreter_professional_ai.js",
-                "interpreter_ai_provider.js",
-                "interpreter_ai_bootstrap.js",
-                "interpreter_standard_arabic.js",
-                "interpreter_live_native_duplex.js",
-                "interpreter_fast_voice.js",
-                "interpreter_precise_barge_in.js",
-                "interpreter_live_latency.js",
-                "interpreter_professional_voice.js"
-            ).map(context::readAssetText)
-        )
-    }
-}
-
-private fun Context.readAssetText(name: String): String =
-    assets.open(name).bufferedReader(Charsets.UTF_8).use { it.readText() }
-
 @SuppressLint("SetJavaScriptEnabled")
-private fun createCoachWebView(
-    context: Context,
-    bridge: PracticeContextBridge,
-    liveBridge: InterpreterLiveNativeBridge,
-    networkBridge: NativeAiNetworkBridge,
-    runtimeAssets: CoachRuntimeAssets,
-    darkTheme: Boolean,
-    onPageLoaded: () -> Unit,
-    onPageError: (String) -> Unit
-): WebView {
+private fun createCoachWebView(context: Context, bridge: PracticeContextBridge): WebView {
+    val html = context.assets.open("interpreter_coach.html")
+        .bufferedReader(Charsets.UTF_8)
+        .use { it.readText() }
+
+    // Retain the Standard Arabic preference and its non-looping observer.
+    val arabicPolicy = context.assets.open("interpreter_standard_arabic.js")
+        .bufferedReader(Charsets.UTF_8).use { it.readText() }
+
     val webView = WebView(context)
     webView.layoutParams = ViewGroup.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.MATCH_PARENT
     )
-    webView.setBackgroundColor(if (darkTheme) 0xFF0E0F12.toInt() else 0xFFFBFBFD.toInt())
     bridge.attachWebView(webView)
-    liveBridge.attachWebView(webView)
-    networkBridge.attachWebView(webView)
     configureCoachWebView(webView)
-    WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
     webView.addJavascriptInterface(bridge, "InterpreterNative")
-    webView.addJavascriptInterface(liveBridge, "InterpreterLiveNative")
-    webView.addJavascriptInterface(networkBridge, "InterpreterAiNetwork")
     webView.webViewClient = object : WebViewClient() {
-        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-            val uri = request?.url ?: return true
-            if (!request.isForMainFrame) return false
-            if (isCoachOrigin(uri)) return false
-            if (request.hasGesture() && uri.scheme.equals("https", ignoreCase = true)) {
-                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-            }
-            return true
-        }
-
-        override fun onPageCommitVisible(view: WebView?, url: String?) {
-            super.onPageCommitVisible(view, url)
-            if (isCoachOrigin(url?.let(Uri::parse))) onPageLoaded()
-        }
-
-        override fun onReceivedError(
-            view: WebView?,
-            request: WebResourceRequest?,
-            error: WebResourceError?
-        ) {
-            super.onReceivedError(view, request, error)
-            if (request?.isForMainFrame == true) {
-                onPageError(
-                    error?.description?.toString()?.takeIf(String::isNotBlank)
-                        ?: "The local coach page could not be loaded."
-                )
-            }
-        }
-
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
-            if (isCoachOrigin(url?.let(Uri::parse))) {
-                val coachView = view ?: return
-                onPageLoaded()
-                coachView.evaluateJavascript(coachEnhancementScript()) {
-                    coachView.evaluateJavascript(runtimeInstallerScript(runtimeAssets.scripts)) {
-                        coachView.evaluateJavascript(coachThemeScript(darkTheme), null)
-                    }
-                }
-            }
+            view?.evaluateJavascript(coachEnhancementScript(), null)
+            view?.evaluateJavascript(arabicPolicy, null)
         }
     }
     webView.webChromeClient = CoachChromeClient(context)
@@ -684,96 +522,14 @@ private fun createCoachWebView(
         setAcceptThirdPartyCookies(webView, true)
     }
 
-    // The complete shell is bundled in the APK and is rendered from memory. It is never hidden
-    // behind a WebView lifecycle callback or a network timeout; only AI replies need the network.
-    loadCoachPage(webView, runtimeAssets.html)
-    return webView
-}
-
-private fun loadCoachPage(webView: WebView, html: String) {
-    webView.stopLoading()
     webView.loadDataWithBaseURL(
-        COACH_URL,
+        "https://interpreter-trainer.app/",
         html,
         "text/html",
         "UTF-8",
-        COACH_URL
+        null
     )
-}
-
-/**
- * Installs every coach layer in a fixed order and retries the dependency-gated layers while the
- * remote Puter SDK finishes loading. The former runtime opened the coach through a path that never
- * installed these assets, leaving users on the older chat/TTS fallback despite shipping newer code.
- */
-private fun runtimeInstallerScript(scripts: List<String>): String {
-    val encodedScripts = scripts.joinToString(",", prefix = "[", postfix = "]") {
-        JSONObject.quote(it)
-    }
-    return """
-        (() => {
-          const scripts = $encodedScripts;
-          const install = () => {
-            for (const source of scripts) {
-              try { (0, eval)(source); } catch (_) {}
-            }
-          };
-          install();
-          clearInterval(window.__interpreterRuntimeInstallTimer);
-          let attempts = 0;
-          window.__interpreterRuntimeInstallTimer = setInterval(() => {
-            install();
-            attempts += 1;
-            const ready = window.__interpreterAiBootstrapV6 &&
-              window.__interpreterAiProviderV1 &&
-              window.__fastInterpreterVoiceV5 &&
-              window.__interpreterLiveLatencyV3 &&
-              window.__professionalInterpreterVoiceV1;
-            if (ready || attempts >= 60) {
-              clearInterval(window.__interpreterRuntimeInstallTimer);
-            }
-          }, 200);
-          return 'installing';
-        })();
-    """.trimIndent()
-}
-
-private fun coachThemeScript(darkTheme: Boolean): String {
-    val values = if (darkTheme) {
-        mapOf(
-            "--bg" to "#0e0f12", "--surface" to "#141519", "--soft" to "#1d1f24",
-            "--surface-soft" to "#1d1f24", "--surface-strong" to "#292c33",
-            "--text" to "#f4f4f6", "--muted" to "#b7bac2", "--faint" to "#848995",
-            "--accent" to "#aeb0ff", "--accent2" to "#b896ff", "--accent-soft" to "#252541",
-            "--accent-ink" to "#d0d1ff", "--border" to "#2d3037", "--danger" to "#ffb4ac",
-            "--ok" to "#76dfa8", "--user" to "#24262c",
-            "--shadow" to "0 18px 55px rgba(0,0,0,.32)"
-        )
-    } else {
-        mapOf(
-            "--bg" to "#fbfbfd", "--surface" to "#ffffff", "--soft" to "#f2f3f7",
-            "--surface-soft" to "#f2f3f7", "--surface-strong" to "#e8eaf0",
-            "--text" to "#17181c", "--muted" to "#727680", "--faint" to "#9b9fa8",
-            "--accent" to "#4b4ee8", "--accent2" to "#7b5cff", "--accent-soft" to "#eeeeff",
-            "--accent-ink" to "#3539c8", "--border" to "#e6e7ec", "--danger" to "#c9362b",
-            "--ok" to "#138a55", "--user" to "#eff0f4",
-            "--shadow" to "0 18px 55px rgba(25,27,40,.10)"
-        )
-    }
-    val encodedValues = values.entries.joinToString(",", prefix = "{", postfix = "}") {
-        JSONObject.quote(it.key) + ":" + JSONObject.quote(it.value)
-    }
-    val themeName = if (darkTheme) "dark" else "light"
-    return """
-        (() => {
-          const root = document.documentElement;
-          root.setAttribute('data-app-theme', '$themeName');
-          root.style.colorScheme = '$themeName';
-          const values = $encodedValues;
-          Object.entries(values).forEach(([key, value]) => root.style.setProperty(key, value));
-          return 'ready';
-        })();
-    """.trimIndent()
+    return webView
 }
 
 private fun coachEnhancementScript(): String = """
@@ -1127,6 +883,107 @@ private fun coachEnhancementScript(): String = """
   window.__interpreterPracticeObserver = new MutationObserver(enhanceAssistantMessages);
   window.__interpreterPracticeObserver.observe(document.body, { childList:true, subtree:true });
 
+  window.sendChat = async function(fromVoice = false) {
+    if (busy) return;
+    const input = document.getElementById('chatInput');
+    const text = input?.value?.trim() || '';
+    if (!text) return;
+
+    document.getElementById('chatError').textContent = '';
+    addMessage('user', text);
+    input.value = '';
+    resizeComposer();
+    updateSendState();
+
+    if (!(await ensureConnected())) {
+      if (window.__voiceCallActive) callStatus('Connection failed', 'Unable to reach Interpreter AI.');
+      return;
+    }
+
+    busy = true;
+    updateSendState();
+    showTyping();
+
+    let streamRow = null;
+    let answer = '';
+    try {
+      const system = `You are Interpreter AI, a fast professional coach for interpreters. Work especially well across Arabic, English and French. Help with simultaneous and consecutive interpreting, shadowing, transcription, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. In voice conversations, sound natural, concise and conversational rather than like a written report. Respond directly in the user's language. Never invent scores, transcripts, history or app facts. The authoritative app/context information below is reliable.\n\n${'$'}{nativePracticeContext()}`;
+      const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
+      const stream = await puter.ai.chat(conversation, {
+        model:'qwen/qwen3.6-27b',
+        stream:true,
+        max_tokens:fromVoice ? 420 : 650,
+        temperature:0.24
+      });
+
+      hideTyping();
+      streamRow = messageElement('assistant', '');
+      streamRow.dataset.streaming = '1';
+      document.getElementById('messages').appendChild(streamRow);
+      const bubble = streamRow.querySelector('.bubble');
+
+      for await (const part of stream) {
+        if (part?.type === 'error') throw new Error(part?.error?.message || part?.message || 'Streaming request failed.');
+        const chunk = typeof part === 'string'
+          ? part
+          : (typeof part?.text === 'string'
+              ? part.text
+              : (typeof part?.delta?.content === 'string' ? part.delta.content : ''));
+        if (!chunk) continue;
+        answer += chunk;
+        if (bubble) bubble.textContent = answer;
+        requestAnimationFrame(scrollToBottom);
+      }
+
+      answer = answer.trim();
+      if (!answer) throw new Error('The AI returned an empty response.');
+      streamRow?.remove();
+      streamRow = null;
+
+      history.push({ role:'user', content:text }, { role:'assistant', content:answer });
+      history = history.slice(-16);
+      saveHistory();
+      addMessage('assistant', answer);
+      setStatus('Online · ready', 'ok');
+
+      if (window.__voiceCallActive) {
+        callStatus('Interpreter AI is speaking', answer);
+        const callLang = document.getElementById('callVoiceLang')?.value || 'en-US';
+        const started = speakVoice(answer, callLang);
+        if (!started) {
+          callStatus('Your turn', 'Voice output is unavailable; listening again.');
+          setTimeout(() => scheduleListening(150), 0);
+        }
+      } else if (window.__voiceAutoSpeak || window.__voiceOneShot) {
+        const lang = document.getElementById('voiceLang')?.value || 'en-US';
+        speakVoice(answer, lang);
+      }
+
+      window.__voiceAutoSpeak = false;
+      window.__voiceOneShot = false;
+    } catch (error) {
+      hideTyping();
+      streamRow?.remove();
+      const message = error?.msg || error?.message || String(error);
+      document.getElementById('chatError').textContent = 'Interpreter AI could not answer: ' + message;
+      setStatus('Request failed', 'bad');
+      if (window.__voiceCallActive) {
+        callStatus('Something went wrong', message);
+        setTimeout(() => scheduleListening(450), 0);
+      }
+      window.__voiceAutoSpeak = false;
+      window.__voiceOneShot = false;
+    } finally {
+      busy = false;
+      updateSendState();
+      if (window.__voiceCallActive && !window.__voiceCallMuted && !window.__voiceAutoSpeak) {
+        const statusText = document.getElementById('voiceCallStatus')?.textContent || '';
+        if (statusText === 'Your turn' || statusText === 'Something went wrong') scheduleListening(350);
+      }
+      if (!window.__voiceCallActive) setTimeout(() => input?.focus(), 50);
+    }
+  };
+
   enhanceAssistantMessages();
 })();
 """.trimIndent()
@@ -1141,22 +998,9 @@ private fun configureCoachWebView(webView: WebView) {
         mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         allowFileAccess = false
         allowContentAccess = false
-        allowFileAccessFromFileURLs = false
-        allowUniversalAccessFromFileURLs = false
-        safeBrowsingEnabled = true
         mediaPlaybackRequiresUserGesture = false
         cacheMode = WebSettings.LOAD_DEFAULT
-        loadsImagesAutomatically = true
-        setSupportZoom(false)
-        builtInZoomControls = false
-        displayZoomControls = false
-        textZoom = 100
-        offscreenPreRaster = true
     }
-    webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-    webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, true)
-    webView.overScrollMode = View.OVER_SCROLL_NEVER
-    webView.isVerticalScrollBarEnabled = false
 }
 
 private class CoachChromeClient(private val context: Context) : WebChromeClient() {
@@ -1199,12 +1043,7 @@ private class CoachChromeClient(private val context: Context) : WebChromeClient(
             )
         }
 
-        popup.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val uri = request?.url ?: return true
-                return uri.scheme != "https" && uri.toString() != "about:blank"
-            }
-        }
+        popup.webViewClient = WebViewClient()
         popup.webChromeClient = object : WebChromeClient() {
             override fun onCloseWindow(window: WebView?) {
                 if (dialog.isShowing) dialog.dismiss()
@@ -1215,8 +1054,6 @@ private class CoachChromeClient(private val context: Context) : WebChromeClient(
         dialog.setCanceledOnTouchOutside(false)
         dialog.setOnDismissListener {
             runCatching { popup.stopLoading() }
-            runCatching { popup.loadUrl("about:blank") }
-            runCatching { popupContainer.removeAllViews() }
             runCatching { popup.destroy() }
         }
 
@@ -1234,13 +1071,6 @@ private class CoachChromeClient(private val context: Context) : WebChromeClient(
         return true
     }
 }
-
-private const val COACH_URL =
-    "https://appassets.androidplatform.net/assets/interpreter_coach.html"
-
-private fun isCoachOrigin(uri: Uri?): Boolean =
-    uri?.scheme.equals("https", ignoreCase = true) &&
-        uri?.host.equals("appassets.androidplatform.net", ignoreCase = true)
 
 private fun buildPracticeContext(sessions: List<PracticeSessionEntity>): String = buildString {
     appendLine("AUTHORITATIVE APP IDENTITY:")

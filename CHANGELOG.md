@@ -1,3 +1,9 @@
+# Classic AI rollback
+
+- Restore the 0.5.5 coach HTML and native streaming/chat/voice implementation from `5a55ee3bc5`.
+- Keep current package signing/versioning, privacy disclosure, practice navigation, saved data and non-looping Standard Arabic policy.
+- Replace checks that required the removed active Qwen3.8/AI6 layers with browser checks of the actual restored implementation. Live provider access remains unverified.
+
 # Changelog
 
 ## Deterministic Interpreter AI opening — 2026-08-31

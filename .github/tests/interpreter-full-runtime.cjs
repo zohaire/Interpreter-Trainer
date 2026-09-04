@@ -66,6 +66,11 @@ const watchdog = setTimeout(() => {
         },
         ai: {
           chat(messages, options) {
+            if (window.__simulateXhrFailure) {
+              window.__xhrFailures = (window.__xhrFailures || 0) + 1;
+              return Promise.reject({ status: 0, readyState: 4, responseText: '', getResponseHeader() { return null; },
+                toString() { return '[object XMLHttpRequest]'; } });
+            }
             window.__calls.push(JSON.parse(JSON.stringify({ messages, options })));
             const answer = 'ANSWER_' + window.__calls.length;
             if (!options.stream) return Promise.resolve({ message: { content: answer } });
@@ -118,8 +123,44 @@ const watchdog = setTimeout(() => {
     await page.waitForFunction(() => window.__voiceStarts > 0);
     await page.click('#voiceEnd');
     assert.equal(await page.locator('#voiceCallOverlay').evaluate(node => node.classList.contains('active')), false);
+
+    // Reproduce the screenshot: authentication works but the SDK rejects an XMLHttpRequest.
+    // The actual page must recover through the Android bridge and keep streaming/context.
+    await page.evaluate(() => {
+      window.__simulateXhrFailure = true;
+      window.__nativeRequests = [];
+      window.puter.authToken = 'test-session-token';
+      window.InterpreterAiNetwork = {
+        startChat(id, body) {
+          window.__nativeRequests.push(JSON.parse(body));
+          const answer = 'NATIVE_RECOVERED_' + window.__nativeRequests.length;
+          setTimeout(() => {
+            const send = (kind, data = '') => window.InterpreterAiProvider.onNativeEvent(id, { kind, data, status: 200 });
+            send('started');
+            send('part', JSON.stringify({ text: answer.slice(0, 5) }));
+            setTimeout(() => { send('part', JSON.stringify({ text: answer.slice(5) })); send('done'); }, 15);
+          }, 0);
+          return true;
+        },
+        cancelChat() {}
+      };
+    });
+    for (let turn = 1; turn <= 2; turn++) {
+      await page.fill('#chatInput', `Recover message ${turn}`);
+      await page.click('#sendBtn');
+      await page.waitForFunction(n => Array.from(document.querySelectorAll('.message.assistant .bubble'))
+        .some(node => node.textContent.includes('NATIVE_RECOVERED_' + n)), turn);
+      await page.waitForFunction(() => !busy);
+    }
+    const recovered = await page.evaluate(() => ({ requests: window.__nativeRequests,
+      failures: window.__xhrFailures, error: document.getElementById('chatError').textContent }));
+    assert.equal(recovered.failures, 1);
+    assert.equal(recovered.error, '');
+    assert.ok(recovered.requests[1].args.messages.some(message => message.content === 'NATIVE_RECOVERED_1'));
+    assert.equal(recovered.requests[1].args.stream, true);
+    assert.equal(recovered.requests[1].args.model, 'qwen/qwen3.8-27b:free');
     assert.deepEqual(errors, []);
-    console.log(`Full Android runtime (${scripts.length} assets) passed: responsive UI, three chat turns, context, evaluation and voice controls.`);
+    console.log(`Full Android runtime (${scripts.length} assets) passed: responsive UI, chat context, evaluation, voice controls and two streamed replies after XMLHttpRequest failure.`);
   } finally {
     await browser.close();
   }

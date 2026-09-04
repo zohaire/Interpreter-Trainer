@@ -9,11 +9,10 @@ Interpreter Trainer is a production-oriented Android 12+ practice studio for Ara
 - Consecutive interpretation with 15, 30 or 60-second source segments
 - Three-language live transcription through Android speech recognition
 - Local practice history with transcripts, recordings, notes and feedback
-- Online Interpreter AI chat and evidence-based evaluation using Qwen3.8 27B through Puter
-- Deterministic in-memory coach startup that is independent of online AI availability
-- Explicit, activation-safe AI connection with recoverable authentication and request timeouts
-- Interruptible Interpreter Live conversations with selectable Studio, Warm and Broadcast neural voices
-- Short, activation-safe streamed responses with device speech/transcription fallbacks
+- Classic Interpreter Coach from version 0.5.5, using Qwen3.6 27B through Puter
+- Streamed chat with conversation context and separate performance evaluation
+- Earlier Interpreter Live voice controls with Android speech recognition and TTS fallback
+- Modern Standard Arabic policy for Arabic responses
 - System, light and dark themes with a responsive Material 3 interface
 - Bluetooth, wired and external audio-route awareness
 
@@ -21,7 +20,7 @@ AI is optional and online-only: the app does not download a 400–500 MB neural 
 
 ## Build and test
 
-Requirements: JDK 21 and Android SDK 36.
+Requirements: JDK 21 and Android SDK 37.
 
 ```bash
 ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
@@ -41,11 +40,13 @@ Package ID: `com.interpretertrainer.app`
 
 Minimum SDK: 31
 
-Target/compile SDK: 36
+Target SDK: 36; compile SDK: 37
 
 ## Release channels
 
-Every pull request and push to `main` verifies the live model catalog, professional prompt policy, neural voice configuration, first-turn authentication, blocked-popup recovery, request timeouts, voice interruption state machine, Kotlin unit tests, Android lint, debug and optimized release builds, signature verification, and artifact upload. After all gates pass on `main`, the workflow creates a versioned preview tag and publishes a GitHub prerelease with an installable APK and an AAB.
+Every pull request and push to `main` checks that the restored model remains in the live provider catalog, tests the classic coach document and its injected Android script together, then runs Kotlin unit tests, Android lint, debug/release builds and signature verification. Browser tests cover two-turn streaming, evaluation, provider error visibility and recovery, practice transfer, voice controls and Arabic labels using a simulated SDK. They do not prove live access through a user's Puter account. After all gates pass on `main`, the workflow publishes an installable preview APK and an AAB.
+
+This release restores the AI implementation from `5a55ee3bc5` (0.5.5), retaining current signing and increasing the package version code so recent previews can be updated in place. Puter authentication and quota still apply to the previous Qwen3.6 model. See [the rollback release notes](docs/PREVIEW_RELEASE_NOTES.md).
 
 GitHub preview packages use the repository's public, stable preview key so testers can install updates. That key is intentionally not a Play production key and must never be used for a store production release. The Play handoff is documented in [docs/PLAY_STORE_RELEASE.md](docs/PLAY_STORE_RELEASE.md).
 

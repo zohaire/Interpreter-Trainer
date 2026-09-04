@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -21,6 +22,7 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -509,8 +511,19 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
     configureCoachWebView(webView)
     webView.addJavascriptInterface(bridge, "InterpreterNative")
     webView.webViewClient = object : WebViewClient() {
+        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+            val uri = request?.url ?: return true
+            if (!request.isForMainFrame) return false
+            if (isClassicCoachOrigin(uri)) return false
+            if (request.hasGesture() && uri.scheme.equals("https", ignoreCase = true)) {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+            }
+            return true
+        }
+
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
+            if (!isClassicCoachOrigin(url?.let(Uri::parse))) return
             view?.evaluateJavascript(coachEnhancementScript(), null)
             view?.evaluateJavascript(arabicPolicy, null)
         }
@@ -998,6 +1011,7 @@ private fun configureCoachWebView(webView: WebView) {
         mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         allowFileAccess = false
         allowContentAccess = false
+        safeBrowsingEnabled = true
         mediaPlaybackRequiresUserGesture = false
         cacheMode = WebSettings.LOAD_DEFAULT
     }
@@ -1043,7 +1057,12 @@ private class CoachChromeClient(private val context: Context) : WebChromeClient(
             )
         }
 
-        popup.webViewClient = WebViewClient()
+        popup.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val uri = request?.url ?: return true
+                return uri.scheme != "https" && uri.toString() != "about:blank"
+            }
+        }
         popup.webChromeClient = object : WebChromeClient() {
             override fun onCloseWindow(window: WebView?) {
                 if (dialog.isShowing) dialog.dismiss()
@@ -1054,6 +1073,8 @@ private class CoachChromeClient(private val context: Context) : WebChromeClient(
         dialog.setCanceledOnTouchOutside(false)
         dialog.setOnDismissListener {
             runCatching { popup.stopLoading() }
+            runCatching { popup.loadUrl("about:blank") }
+            runCatching { popupContainer.removeAllViews() }
             runCatching { popup.destroy() }
         }
 
@@ -1071,6 +1092,10 @@ private class CoachChromeClient(private val context: Context) : WebChromeClient(
         return true
     }
 }
+
+private fun isClassicCoachOrigin(uri: Uri?): Boolean =
+    uri?.scheme.equals("https", ignoreCase = true) &&
+        uri?.host.equals("interpreter-trainer.app", ignoreCase = true)
 
 private fun buildPracticeContext(sessions: List<PracticeSessionEntity>): String = buildString {
     appendLine("AUTHORITATIVE APP IDENTITY:")

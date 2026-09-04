@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.interpretertrainer.app.BuildConfig
+import com.interpretertrainer.app.ai.NativeAiNetworkBridge
 import com.interpretertrainer.app.ai.AiPracticeBridge
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.privacy.AiPrivacyPreferences
@@ -173,6 +174,8 @@ private fun ActiveAiCoachScreen(
         InterpreterLiveNativeBridge(context.applicationContext)
     }
 
+    val networkBridge = remember { NativeAiNetworkBridge() }
+
     SideEffect {
         bridgeHolder.value = bridge
         bridge.contextValue = buildPracticeContext(sessions)
@@ -182,10 +185,12 @@ private fun ActiveAiCoachScreen(
         onDispose {
             bridge.dispose()
             liveBridge.dispose()
+            networkBridge.dispose()
             webViewRef.value?.let { webView ->
                 runCatching { webView.stopLoading() }
                 runCatching { webView.removeJavascriptInterface("InterpreterNative") }
                 runCatching { webView.removeJavascriptInterface("InterpreterLiveNative") }
+                runCatching { webView.removeJavascriptInterface("InterpreterAiNetwork") }
                 runCatching { webView.loadUrl("about:blank") }
                 runCatching { webView.destroy() }
             }
@@ -208,6 +213,7 @@ private fun ActiveAiCoachScreen(
                         context = webContext,
                         bridge = bridge,
                         liveBridge = liveBridge,
+                        networkBridge = networkBridge,
                         runtimeAssets = runtimeAssets,
                         darkTheme = darkTheme,
                         onPageLoaded = {
@@ -608,6 +614,7 @@ private fun createCoachWebView(
     context: Context,
     bridge: PracticeContextBridge,
     liveBridge: InterpreterLiveNativeBridge,
+    networkBridge: NativeAiNetworkBridge,
     runtimeAssets: CoachRuntimeAssets,
     darkTheme: Boolean,
     onPageLoaded: () -> Unit,
@@ -621,10 +628,12 @@ private fun createCoachWebView(
     webView.setBackgroundColor(if (darkTheme) 0xFF0E0F12.toInt() else 0xFFFBFBFD.toInt())
     bridge.attachWebView(webView)
     liveBridge.attachWebView(webView)
+    networkBridge.attachWebView(webView)
     configureCoachWebView(webView)
     WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
     webView.addJavascriptInterface(bridge, "InterpreterNative")
     webView.addJavascriptInterface(liveBridge, "InterpreterLiveNative")
+    webView.addJavascriptInterface(networkBridge, "InterpreterAiNetwork")
     webView.webViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
             val uri = request?.url ?: return true

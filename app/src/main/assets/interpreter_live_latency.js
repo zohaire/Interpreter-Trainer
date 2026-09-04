@@ -35,7 +35,7 @@
     request.splice(Math.max(1, insertAt), 0, { role: 'user', content: previousUserText });
   };
 
-  const wrappedChat = async (...args) => {
+  const prepareLiveRequest = args => {
     if (window.__voiceCallActive) {
       const request = args[0];
       if (Array.isArray(request)) {
@@ -55,8 +55,10 @@
         temperature: Math.min(Number(current.temperature) || 0.20, 0.20)
       };
     }
-    return originalChat(...args);
+    return args;
   };
+  window.__prepareInterpreterLiveRequest = prepareLiveRequest;
+  const wrappedChat = async (...args) => originalChat(...prepareLiveRequest(args));
 
   wrappedChat.__interpreterLiveLatencyWrapped = true;
   try {

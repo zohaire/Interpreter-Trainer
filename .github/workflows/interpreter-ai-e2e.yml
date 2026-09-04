@@ -1,43 +1,11 @@
-name: Interpreter AI Integration
+name: Classic Interpreter AI integration
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [ "main", "master" ]
-    paths:
-      - "app/src/main/assets/interpreter_coach.html"
-      - "app/src/main/assets/interpreter_standard_arabic.js"
-      - ".github/tests/interpreter-arabic-observer.cjs"
-      - ".github/tests/interpreter-full-runtime.cjs"
-      - "app/src/main/assets/interpreter_professional_ai.js"
-      - "app/src/main/assets/interpreter_ai_provider.js"
-      - "app/src/main/java/com/interpretertrainer/app/ai/**"
-      - "app/src/main/assets/interpreter_ai_bootstrap.js"
-      - "app/src/main/assets/interpreter_fast_voice.js"
-      - "app/src/main/assets/interpreter_professional_voice.js"
-      - "app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt"
-      - "app/build.gradle.kts"
-      - ".github/tests/interpreter-coach-startup.cjs"
-      - ".github/tests/interpreter-ai-provider.cjs"
-      - ".github/workflows/interpreter-ai-e2e.yml"
-  push:
-    branches: [ "main", "master" ]
-    paths:
-      - "app/src/main/assets/interpreter_coach.html"
-      - "app/src/main/assets/interpreter_standard_arabic.js"
-      - ".github/tests/interpreter-arabic-observer.cjs"
-      - ".github/tests/interpreter-full-runtime.cjs"
-      - "app/src/main/assets/interpreter_professional_ai.js"
-      - "app/src/main/assets/interpreter_ai_provider.js"
-      - "app/src/main/java/com/interpretertrainer/app/ai/**"
-      - "app/src/main/assets/interpreter_ai_bootstrap.js"
-      - "app/src/main/assets/interpreter_fast_voice.js"
-      - "app/src/main/assets/interpreter_professional_voice.js"
-      - "app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt"
-      - "app/build.gradle.kts"
-      - ".github/tests/interpreter-coach-startup.cjs"
-      - ".github/tests/interpreter-ai-provider.cjs"
-      - ".github/workflows/interpreter-ai-e2e.yml"
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   browser-integration:
@@ -45,295 +13,29 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-
-      - name: Validate bundled Interpreter AI and Live files
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --check app/src/main/assets/interpreter_professional_ai.js
-          node --check app/src/main/assets/interpreter_ai_provider.js
-          node --check app/src/main/assets/interpreter_ai_bootstrap.js
-          node --check app/src/main/assets/interpreter_fast_voice.js
-          node --check app/src/main/assets/interpreter_professional_voice.js
-          grep -q 'interpreter_ai_bootstrap.js' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q 'interpreter_ai_provider.js' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q 'interpreter_professional_voice.js' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q 'qwen/qwen3.8-27b:free' app/src/main/assets/interpreter_coach.html
-          grep -q 'Professional AI · connected' app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q 'connectFromUserGesture' app/src/main/assets/interpreter_ai_provider.js
-          grep -q 'attempt_temp_user_creation' app/src/main/assets/interpreter_ai_provider.js
-          grep -q 'voiceCallLaunch' app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q 'voiceCallOverlay' app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q 'voiceBtn' app/src/main/assets/interpreter_ai_bootstrap.js
-          grep -q '__fastInterpreterVoiceV4' app/src/main/assets/interpreter_fast_voice.js
-          grep -q '__loadInterpreterAiSdk' app/src/main/assets/interpreter_coach.html
-          grep -q 'loadDataWithBaseURL' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q 'runtimeAssets.html' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q 'onPageCommitVisible' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          if grep -q 'COACH_STARTUP_TIMEOUT_MS\|alpha(webAlpha)' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt; then
-            echo 'The bundled coach must not be hidden behind a native readiness timeout.'
-            exit 1
-          fi
-          if grep -q '<script src="https://js.puter.com/v2/' app/src/main/assets/interpreter_coach.html; then
-            echo 'Puter must not block the local coach document during startup.'
-            exit 1
-          fi
-          if grep -q 'await ensureConnected' app/src/main/assets/interpreter_fast_voice.js; then
-            echo 'Interpreter AI must not await a readiness helper before the first Puter call.'
-            exit 1
-          fi
-
-      - name: Test provider authentication recovery and timeouts
-        shell: bash
-        run: |
-          node .github/tests/interpreter-arabic-observer.cjs
-          node .github/tests/interpreter-ai-provider.cjs
-
-      - name: Verify Qwen3.8 27B Free remains in Puter live catalog
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --location --fail --silent --show-error \
-            --retry 3 --retry-delay 2 --max-time 45 \
-            https://api.puter.com/puterai/chat/models/details \
-            --output /tmp/puter-models.json
-          test -s /tmp/puter-models.json
-          grep -q 'qwen/qwen3.8-27b:free' /tmp/puter-models.json
-          echo 'Qwen3.8 27B Free is available in the live Puter catalog.'
-
-      - name: Set up Node 22
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Install Chromium
+      - name: Check restored model in the live provider catalog
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/interpreter-ai-test
-          cd /tmp/interpreter-ai-test
+          curl --location --fail --silent --show-error --max-time 45 \
+            https://api.puter.com/puterai/chat/models/details --output /tmp/puter-models.json
+          node -e "const {models}=require('/tmp/puter-models.json'); if(!models.some(m=>m.id==='qwen/qwen3.6-27b'||(m.aliases||[]).includes('qwen/qwen3.6-27b'))) throw Error('Restored model missing from live catalog');"
+      - name: Install browser test runtime
+        working-directory: /tmp
+        run: |
+          mkdir -p /tmp/puter-ci
+          cd /tmp/puter-ci
           npm init -y >/dev/null
           npm install --silent playwright@1.55.0
           npx playwright install --with-deps chromium
-
-      - name: Test every Android AI runtime layer together
+      - name: Verify restored runtime and Arabic observer
         env:
-          NODE_PATH: /tmp/interpreter-ai-test/node_modules
-        run: node .github/tests/interpreter-full-runtime.cjs
-
-      - name: Test non-blocking coach startup
-        shell: bash
-        env:
-          NODE_PATH: /tmp/interpreter-ai-test/node_modules
+          NODE_PATH: /tmp/puter-ci/node_modules
         run: |
-          set -euo pipefail
-          python3 -m http.server 8765 --directory "$GITHUB_WORKSPACE/app/src/main/assets" >/tmp/interpreter-startup-http.log 2>&1 &
-          SERVER_PID=$!
-          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
-          node .github/tests/interpreter-coach-startup.cjs
-
-      - name: Test Android coach AI plus Interpreter Live controls
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m http.server 8765 --directory "$GITHUB_WORKSPACE/app/src/main/assets" >/tmp/interpreter-ai-http.log 2>&1 &
-          SERVER_PID=$!
-          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
-
-          cat > /tmp/interpreter-ai-test/test.cjs <<'NODE'
-          const { chromium } = require('playwright');
-          const path = require('path');
-
-          (async () => {
-            const browser = await chromium.launch({ headless: true });
-            const page = await browser.newPage();
-
-            await page.route('https://js.puter.com/v2/**', async route => {
-              await route.fulfill({
-                status: 200,
-                contentType: 'application/javascript',
-                body: `
-                  window.__mockSigned = false;
-                  window.__signInCalls = 0;
-                  window.__signInActivation = false;
-                  window.__chatCalls = [];
-                  window.__ttsCalls = [];
-                  window.puter = {
-                    auth: {
-                      isSignedIn() { return window.__mockSigned === true; },
-                      signIn() {
-                        window.__signInCalls += 1;
-                        window.__signInActivation = Boolean(navigator.userActivation?.isActive);
-                        window.__mockSigned = true;
-                        return Promise.resolve({ success:true });
-                      }
-                    },
-                    ai: {
-                      chat(messages, options) {
-                        window.__chatCalls.push({
-                          messages,
-                          options,
-                          userActivation: Boolean(navigator.userActivation?.isActive)
-                        });
-                        window.__mockSigned = true;
-                        if (options?.stream) {
-                          return (async function* () { yield { text: 'INTERPRETER_AI_OK' }; })();
-                        }
-                        return Promise.resolve({ message: { content: 'INTERPRETER_AI_OK' } });
-                      },
-                      async txt2speech(text, options) {
-                        window.__ttsCalls.push({ text, options });
-                        return {
-                          currentTime: 0,
-                          pause() {},
-                          async play() {
-                            this.onplay?.();
-                            this.onended?.();
-                          }
-                        };
-                      }
-                    }
-                  };
-                `
-              });
-            });
-
-            await page.goto('http://127.0.0.1:8765/interpreter_coach.html', {
-              waitUntil: 'domcontentloaded',
-              timeout: 60000
-            });
-            await page.waitForFunction(() => Boolean(window.puter?.ai?.chat), null, {
-              timeout: 10000
-            });
-
-            // InterpreterNative exists before page patches in the real Android WebView.
-            await page.evaluate(() => {
-              window.InterpreterNative = {
-                setVoiceLanguage() {},
-                startVoiceInput() { window.__voiceStarts = (window.__voiceStarts || 0) + 1; },
-                stopVoiceInput() {},
-                speakText() { return false; },
-                stopSpeaking() {},
-                getPracticeContext() { return 'No saved practice context.'; }
-              };
-            });
-
-            const professionalAi = path.join(
-              process.env.GITHUB_WORKSPACE,
-              'app/src/main/assets/interpreter_professional_ai.js'
-            );
-            await page.addScriptTag({ path: professionalAi });
-
-            const provider = path.join(
-              process.env.GITHUB_WORKSPACE,
-              'app/src/main/assets/interpreter_ai_provider.js'
-            );
-            await page.addScriptTag({ path: provider });
-
-            const bootstrap = path.join(
-              process.env.GITHUB_WORKSPACE,
-              'app/src/main/assets/interpreter_ai_bootstrap.js'
-            );
-            await page.addScriptTag({ path: bootstrap });
-
-            const fastVoice = path.join(
-              process.env.GITHUB_WORKSPACE,
-              'app/src/main/assets/interpreter_fast_voice.js'
-            );
-            await page.addScriptTag({ path: fastVoice });
-
-            const professionalVoice = path.join(
-              process.env.GITHUB_WORKSPACE,
-              'app/src/main/assets/interpreter_professional_voice.js'
-            );
-            await page.addScriptTag({ path: professionalVoice });
-            await page.waitForTimeout(250);
-
-            const before = await page.evaluate(() => ({
-              signInCalls: window.__signInCalls,
-              chatCalls: window.__chatCalls.length,
-              status: document.getElementById('statusText')?.textContent || '',
-              bootstrapV5: Boolean(window.__interpreterAiBootstrapV5),
-              providerV1: Boolean(window.__interpreterAiProviderV1),
-              fastVoiceV4: Boolean(window.__fastInterpreterVoiceV4),
-              voiceUiRestored: Boolean(window.__voiceUiRestoredByBootstrapV5),
-              professionalAi: Boolean(window.__interpreterProfessionalAiV1),
-              professionalVoice: Boolean(window.__professionalInterpreterVoiceV1),
-              voiceButton: Boolean(document.getElementById('voiceBtn')),
-              liveLaunch: Boolean(document.getElementById('voiceCallLaunch')),
-              liveOverlay: Boolean(document.getElementById('voiceCallOverlay')),
-              voiceProfile: Boolean(document.getElementById('voiceProfile'))
-            }));
-            if (!before.bootstrapV5) throw new Error('AI bootstrap V5 did not load.');
-            if (!before.providerV1) throw new Error('AI provider V1 did not load.');
-            if (!before.fastVoiceV4) throw new Error('Fast Interpreter AI V4 did not load.');
-            if (!before.professionalAi || !before.professionalVoice || !before.voiceProfile) {
-              throw new Error('Professional AI prompt or neural voice layer did not load.');
-            }
-            if (!before.voiceUiRestored || !before.voiceButton || !before.liveLaunch || !before.liveOverlay) {
-              throw new Error('Interpreter Live / voice controls disappeared from the coach.');
-            }
-            if (before.signInCalls !== 0) throw new Error('Manual authentication ran before a request.');
-            if (before.chatCalls !== 0) throw new Error('AI generated a request before the user sent anything.');
-            if (!/tap connect ai/i.test(before.status)) throw new Error(`Unexpected initial AI status: ${before.status}`);
-
-            await page.fill('#chatInput', 'Confirm the interpreter coach works.');
-            await page.click('#sendBtn');
-            await page.waitForFunction(() =>
-              Array.from(document.querySelectorAll('.message.assistant .bubble'))
-                .some(node => (node.textContent || '').includes('INTERPRETER_AI_OK')),
-              null,
-              { timeout: 10000 }
-            );
-
-            const first = await page.evaluate(() => ({
-              signInCalls: window.__signInCalls,
-              signInActivation: window.__signInActivation,
-              chatCalls: window.__chatCalls,
-              status: document.getElementById('statusText')?.textContent || '',
-              error: document.getElementById('chatError')?.textContent || ''
-            }));
-
-            if (first.signInCalls !== 1) throw new Error(`Expected one explicit signIn call, got ${first.signInCalls}.`);
-            if (!first.signInActivation) throw new Error('Puter signIn lost transient user activation.');
-            if (first.chatCalls.length !== 1) throw new Error(`Expected one AI request, got ${first.chatCalls.length}.`);
-            if (first.chatCalls[0]?.options?.model !== 'qwen/qwen3.8-27b:free') {
-              throw new Error(`Wrong AI model: ${first.chatCalls[0]?.options?.model}`);
-            }
-            const systemPrompt = first.chatCalls[0]?.messages?.[0]?.content || '';
-            if (!/Never sound ceremonial, archaic, robotic/i.test(systemPrompt)) {
-              throw new Error('Modern professional coaching policy is missing from the system prompt.');
-            }
-            if (!/professional ai.*connected/i.test(first.status)) throw new Error(`AI did not stay connected: ${first.status}`);
-            if (first.error) throw new Error(`Unexpected visible AI error: ${first.error}`);
-
-            // The live call button itself must still open the full-screen voice experience.
-            await page.click('#voiceCallLaunch');
-            await page.waitForFunction(() => document.getElementById('voiceCallOverlay')?.classList.contains('active'), null, { timeout: 5000 });
-            const live = await page.evaluate(() => ({
-              active: document.getElementById('voiceCallOverlay')?.classList.contains('active') === true,
-              voiceStarts: window.__voiceStarts || 0
-            }));
-            if (!live.active) throw new Error('Interpreter Live overlay did not open.');
-            if (live.voiceStarts < 1) throw new Error('Interpreter Live did not start native voice input.');
-
-            await page.evaluate(() => window.__professionalVoiceSpeak('A concise professional test.', 'en-US'));
-            await page.waitForFunction(() => window.__ttsCalls.length === 1, null, { timeout: 5000 });
-            const voice = await page.evaluate(() => window.__ttsCalls[0]);
-            if (voice.options?.provider !== 'openai' || voice.options?.model !== 'gpt-4o-mini-tts') {
-              throw new Error(`Professional neural voice was not used: ${JSON.stringify(voice.options)}`);
-            }
-            if (!/present-day conference interpreter coach/i.test(voice.options?.instructions || '')) {
-              throw new Error('Professional voice direction is missing.');
-            }
-
-            await browser.close();
-            console.log('Interpreter AI integration passed: explicit activation-safe auth, Qwen3.8 professional prompt, neural Studio voice and live overlay.');
-          })().catch(error => {
-            console.error(error);
-            process.exit(1);
-          });
-          NODE
-
-          cd /tmp/interpreter-ai-test
-          node test.cjs
+          node .github/tests/interpreter-arabic-observer.cjs
+          node .github/tests/interpreter-classic-runtime.cjs
+      - name: Explain validation boundary
+        run: echo 'The catalog check is live. Browser tests simulate the SDK and do not prove a signed-in user can receive a live answer.' >> "$GITHUB_STEP_SUMMARY"

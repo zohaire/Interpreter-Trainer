@@ -1,24 +1,9 @@
-# Interpreter Trainer 1.0.0 Preview
+# Interpreter Trainer — classic AI rollback
 
-## Interpreter AI connection repair
+Restores the Interpreter Coach screen and Qwen3.6 27B request flow from version 0.5.5, commit `5a55ee3bc5`, before the Qwen3.8 and professional AI changes. Chat, streamed replies, evaluation and the earlier voice controls use the classic implementation again.
 
-- Android sends chat and evaluation directly through authenticated native HTTPS. A stalled browser SDK can no longer prevent the native request from starting.
-- A saved login now shows “Signed in · send a message.” The green “connected” indicator appears only after a nonempty AI answer or evaluation is received.
-- Request failures clear the verified status. Expired sessions offer sign-in again and retain the unsent message for retry.
-- Regression coverage includes a permanently stalled SDK, consecutive native replies, evaluation, stream cancellation, and expired-session recovery through the actual chat UI.
+This is an AI rollback packaged as a newer Android version. The application ID and existing preview signing key are retained so it can be installed over recent preview builds. Saved practice data, recording storage, privacy consent and the fixed Modern Standard Arabic policy are preserved.
 
-## Interpreter AI freeze fix
+The live provider catalog still lists `qwen/qwen3.6-27b`. Puter authentication and account quota still apply; this model is not the Qwen3.8 free route. Automated browser checks use a simulated SDK and cannot establish live account availability. A real reply on the user's signed-in device has not been verified.
 
-- Fixes an infinite loop in Arabic language labels that could freeze the AI screen, sign-in, chat and voice controls.
-- Keeps Modern Standard Arabic labels and the existing Qwen model, coaching prompts and neural voice profiles.
-- Adds a regression test that loads every AI script in the Android app's exact order and checks three chat turns, conversation context, evaluation and voice controls.
-
-Provider authentication and AI generation require an internet connection. The UI regression tests simulate provider responses; they do not certify a user's live Puter session.
-
-This is the first production-readiness preview of the Arabic, English and French interpretation practice studio.
-
-Highlights include simultaneous and consecutive interpretation, shadowing, live transcription, local practice history, smoother screen motion, an optional Qwen3.8 professional coach, evidence-based performance feedback and interruptible voice conversation with Studio, Warm and Broadcast neural voice profiles. The release also includes explicit AI privacy controls, safer local recording cleanup and optimized APK/AAB builds.
-
-The Interpreter AI interface now renders directly from the HTML bundled inside the APK and is never hidden behind a WebView readiness callback or connection timer. Slow or unavailable networks are reported inside the open coach and cannot replace the interface with a false startup-timeout screen.
-
-The APK is suitable for direct preview installation on Android 12 or newer. It is signed with the repository's public preview key so it is **not** a Google Play production package. AI feedback is advisory, and the app does not claim certified assessment or sign-language translation.
+Android 12 or newer is required. Download the APK for direct installation; an AAB is not an installable APK.

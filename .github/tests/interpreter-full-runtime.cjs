@@ -57,10 +57,12 @@ const watchdog = setTimeout(() => {
       window.puter = {
         auth: {
           isSignedIn: () => window.__signed,
+          signOut() { window.__signed = false; window.puter.authToken = null; },
           signIn() {
             window.__signIns += 1;
             window.__signInActivation = navigator.userActivation.isActive;
             window.__signed = true;
+            window.puter.authToken = 'test-session-token';
             return Promise.resolve({ success: true });
           }
         },
@@ -68,8 +70,7 @@ const watchdog = setTimeout(() => {
           chat(messages, options) {
             if (window.__simulateXhrFailure) {
               window.__xhrFailures = (window.__xhrFailures || 0) + 1;
-              return Promise.reject({ status: 0, readyState: 4, responseText: '', getResponseHeader() { return null; },
-                toString() { return '[object XMLHttpRequest]'; } });
+              return new Promise(() => {});
             }
             window.__calls.push(JSON.parse(JSON.stringify({ messages, options })));
             const answer = 'ANSWER_' + window.__calls.length;
@@ -94,6 +95,10 @@ const watchdog = setTimeout(() => {
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 30)));
     assert.equal(await page.locator('#voiceLang option[value="ar-MA"]').textContent(), 'AR · MSA');
     assert.equal(await page.locator('#callVoiceLang option[value="ar-MA"]').textContent(), 'العربية الفصحى');
+    await page.click('#connectAiBtn');
+    await page.waitForFunction(() => document.getElementById('statusText').textContent === 'Signed in · send a message');
+    assert.equal(await page.locator('#statusDot').evaluate(node => node.classList.contains('ok')), false,
+      'Sign-in must not claim that the model has responded.');
     for (let turn = 1; turn <= 3; turn += 1) {
       await page.fill('#chatInput', `Practice turn ${turn}`);
       await page.click('#sendBtn');
@@ -124,8 +129,8 @@ const watchdog = setTimeout(() => {
     await page.click('#voiceEnd');
     assert.equal(await page.locator('#voiceCallOverlay').evaluate(node => node.classList.contains('active')), false);
 
-    // Reproduce the screenshot: authentication works but the SDK rejects an XMLHttpRequest.
-    // The actual page must recover through the Android bridge and keep streaming/context.
+    // The Android bridge must work even when SDK chat never settles.
+    // Use the real page, two turns and preserved conversation context.
     await page.evaluate(() => {
       window.__simulateXhrFailure = true;
       window.__nativeRequests = [];
@@ -136,6 +141,12 @@ const watchdog = setTimeout(() => {
           const answer = 'NATIVE_RECOVERED_' + window.__nativeRequests.length;
           setTimeout(() => {
             const send = (kind, data = '') => window.InterpreterAiProvider.onNativeEvent(id, { kind, data, status: 200 });
+            if (window.__nativeExpired) {
+              window.InterpreterAiProvider.onNativeEvent(id, {
+                kind: 'http_error', status: 401, data: '{"error":{"code":"token_auth_failed"}}'
+              });
+              return;
+            }
             send('started');
             send('part', JSON.stringify({ text: answer.slice(0, 5) }));
             setTimeout(() => { send('part', JSON.stringify({ text: answer.slice(5) })); send('done'); }, 15);
@@ -154,13 +165,25 @@ const watchdog = setTimeout(() => {
     }
     const recovered = await page.evaluate(() => ({ requests: window.__nativeRequests,
       failures: window.__xhrFailures, error: document.getElementById('chatError').textContent }));
-    assert.equal(recovered.failures, 1);
+    assert.equal(recovered.failures || 0, 0, 'The Android transport must run before any SDK request.');
     assert.equal(recovered.error, '');
     assert.ok(recovered.requests[1].args.messages.some(message => message.content === 'NATIVE_RECOVERED_1'));
     assert.equal(recovered.requests[1].args.stream, true);
     assert.equal(recovered.requests[1].args.model, 'qwen/qwen3.8-27b:free');
+    await page.evaluate(() => { window.__nativeExpired = true; });
+    await page.fill('#chatInput', 'Keep this message after session expiry');
+    await page.click('#sendBtn');
+    await page.waitForFunction(() => !busy && document.getElementById('chatError').textContent.includes('session has expired'));
+    assert.equal(await page.inputValue('#chatInput'), 'Keep this message after session expiry');
+    assert.equal(await page.locator('#statusDot').evaluate(node => node.classList.contains('ok')), false);
+    assert.equal(await page.locator('#connectAiBtn').isVisible(), true);
+    await page.evaluate(() => { window.__nativeExpired = false; });
+    await page.click('#sendBtn');
+    await page.waitForFunction(() => !busy && history.some(item => item.content === 'NATIVE_RECOVERED_4'));
+    assert.equal(await page.locator('#chatError').textContent(), '');
+    assert.equal(await page.locator('#statusDot').evaluate(node => node.classList.contains('ok')), true);
     assert.deepEqual(errors, []);
-    console.log(`Full Android runtime (${scripts.length} assets) passed: responsive UI, chat context, evaluation, voice controls and two streamed replies after XMLHttpRequest failure.`);
+    console.log(`Full Android runtime (${scripts.length} assets) passed: responsive UI, chat context, evaluation, voice controls and two native replies while SDK chat stalls.`);
   } finally {
     await browser.close();
   }

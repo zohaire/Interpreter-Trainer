@@ -10,7 +10,7 @@
   let state = 'loading';
   let detail = '';
   let authPromise = null;
-  let preferNativeNetwork = false;
+  let responseVerified = false;
   let nativeSequence = 0;
   const nativeCalls = new Map();
 
@@ -84,6 +84,7 @@
   const snapshot = () => ({
     state,
     detail,
+    responseVerified,
     sdkReady: Boolean(window.puter?.ai?.chat),
     authenticated: window.puter?.auth?.isSignedIn?.() === true
   });
@@ -122,7 +123,7 @@
     if (navigator.onLine === false) return publish('offline', 'Internet connection required');
     if (!window.puter?.ai?.chat) return publish('loading', 'Loading secure AI service');
     if (authPromise) return publish('connecting', 'Complete the secure sign-in window');
-    if (state === 'error') return snapshot();
+    if (state === 'error' || state === 'requesting') return snapshot();
     if (window.puter?.auth?.isSignedIn?.() === true) return publish('ready', 'Connected');
     return publish('needs_auth', 'Tap Connect AI once');
   };
@@ -213,6 +214,7 @@
   };
 
   const requestFailure = cause => {
+    responseVerified = false;
     const value = errorDetails(cause);
     const error = errorWithCode(value.code || (isNetworkFailure(cause) ? 'NETWORK_ERROR' : 'REQUEST_FAILED'), providerMessage(cause));
     error.status = value.status;
@@ -223,7 +225,7 @@
     return error;
   };
 
-  // The APK fallback talks only to Puter's fixed HTTPS chat endpoint using the current SDK
+  // The APK transport talks only to Puter's fixed HTTPS chat endpoint using the current SDK
   // session token. It preserves NDJSON streaming and never retries after partial output.
   const nativeRequest = (messages, options) => {
     [messages, options] = window.__prepareInterpreterLiveRequest?.([messages, options]) || [messages, options];
@@ -306,7 +308,10 @@
       throw errorWithCode('AUTH_REQUIRED', 'Tap Connect AI before sending a message.');
     }
     const nativeAvailable = Boolean(window.InterpreterAiNetwork?.startChat && window.puter.authToken);
-    if (preferNativeNetwork && nativeAvailable) return nativeRequest(messages, options);
+    publish('requesting', 'Waiting for an AI response');
+    // SDK requests may wait inside browser permission/upgrade dialogs without rejecting.
+    // Use Android HTTPS immediately, so those waits cannot prevent native transport from running.
+    if (nativeAvailable) return nativeRequest(messages, options);
     try {
       const response = await withTimeout(
         window.puter.ai.chat(messages, options),
@@ -314,23 +319,8 @@
         'REQUEST_TIMEOUT',
         'Interpreter AI did not start responding in time.'
       );
-      if (!nativeAvailable || !response?.[Symbol.asyncIterator]) return response;
-      return (async function* () {
-        let receivedPart = false;
-        try {
-          for await (const part of response) { receivedPart = true; yield part; }
-        } catch (error) {
-          if (receivedPart || !isNetworkFailure(error)) throw error;
-          preferNativeNetwork = true;
-          const recovered = await nativeRequest(messages, options);
-          for await (const part of streamParts(recovered)) yield part;
-        }
-      })();
+      return response;
     } catch (error) {
-      if (nativeAvailable && isNetworkFailure(error)) {
-        preferNativeNetwork = true;
-        return nativeRequest(messages, options);
-      }
       throw requestFailure(error);
     }
   };
@@ -376,6 +366,13 @@
     syncState,
     getState: snapshot,
     messageForError: providerMessage,
+    reportFailure: requestFailure,
+    confirmResponse: answer => {
+      if (typeof answer !== 'string' || !answer.trim()) return false;
+      responseVerified = true;
+      publish('ready', 'AI response verified');
+      return true;
+    },
     onNativeEvent: (id, event) => nativeCalls.get(id)?.(event),
     constants: { AUTH_TIMEOUT_MS, REQUEST_TIMEOUT_MS, STREAM_IDLE_TIMEOUT_MS }
   };

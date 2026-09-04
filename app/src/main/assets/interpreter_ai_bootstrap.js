@@ -42,8 +42,10 @@
       return false;
     }
 
-    setConnectionStatus('Professional AI · connected', 'ok');
-    setError('');
+    const current = provider()?.getState?.();
+    if (current?.state === 'error' || current?.state === 'requesting') return false;
+    setConnectionStatus(current?.responseVerified ? 'Professional AI · connected' : 'Signed in · send a message',
+      current?.responseVerified ? 'ok' : 'idle');
     return true;
   };
 
@@ -89,12 +91,15 @@
     installConnectionUi();
     const button = byId('connectAiBtn');
     if (button) {
-      button.hidden = value.state === 'ready';
+      button.hidden = value.state === 'ready' || value.state === 'requesting';
       button.disabled = value.state === 'connecting' || value.state === 'offline';
       button.textContent = value.state === 'loading' || value.state === 'error' ? 'Try again' :
         value.state === 'connecting' ? 'Connecting…' : 'Connect AI';
     }
-    if (value.state === 'ready') setConnectionStatus('Professional AI · connected', 'ok');
+    if (value.state === 'ready') setConnectionStatus(
+      value.responseVerified ? 'Professional AI · connected' : 'Signed in · send a message',
+      value.responseVerified ? 'ok' : 'idle');
+    else if (value.state === 'requesting') setConnectionStatus('Waiting for AI response…');
     else if (value.state === 'offline') setConnectionStatus('Offline · reconnect to use AI', 'bad');
     else if (value.state === 'error') setConnectionStatus('AI connection needs attention', 'bad');
     else if (value.state === 'connecting') setConnectionStatus('Complete secure AI sign-in…');
@@ -389,6 +394,7 @@
       const response = await request;
       const answer = responseText(response);
       if (!answer) throw new Error('The AI returned an empty response.');
+      provider().confirmResponse(answer);
 
       history.push({ role:'user', content:text }, { role:'assistant', content:answer });
       history = history.slice(-20);
@@ -398,6 +404,7 @@
       setConnectionStatus('Professional AI · connected', 'ok');
     } catch (error) {
       hideTyping();
+      provider()?.reportFailure?.(error);
       const message = providerError(error);
       setError('Interpreter AI could not answer: ' + message);
       setConnectionStatus('Request failed', 'bad');
@@ -456,6 +463,7 @@
       const response = await request;
       const answer = responseText(response);
       if (!answer) throw new Error('The AI returned an empty evaluation.');
+      provider().confirmResponse(answer);
 
       if (result) {
         result.innerHTML = '';
@@ -472,6 +480,7 @@
       }
       setConnectionStatus('Professional AI · connected', 'ok');
     } catch (error) {
+      provider()?.reportFailure?.(error);
       const message = providerError(error);
       if (result) result.innerHTML = '<div class="result-card error-box">Evaluation failed: ' + escapeHtml(message) + '</div>';
       setConnectionStatus('Request failed', 'bad');

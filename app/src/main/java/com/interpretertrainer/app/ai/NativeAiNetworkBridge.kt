@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
-/** Used only by the bundled coach when WebView's authenticated XHR fails. No arbitrary URLs. */
+/** Authenticated HTTPS transport for the bundled coach. No arbitrary URLs or SDK popup waits. */
 internal class NativeAiNetworkBridge {
     private val handler = Handler(Looper.getMainLooper())
     private val executor = Executors.newFixedThreadPool(2)

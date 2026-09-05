@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   puter-ai-browser-test:
-    name: Verify restored classic Interpreter AI
+    name: Verify secure streaming Interpreter AI
     uses: ./.github/workflows/interpreter-ai-e2e.yml
 
   build:
@@ -47,24 +47,6 @@ jobs:
           keytool -list -keystore "$KEYSTORE" \
             -storepass android -alias androiddebugkey >/dev/null
           echo "Stable Interpreter Trainer development signing key installed."
-
-      - name: Guard restored online coach and data compatibility
-        shell: bash
-        run: |
-          set -euo pipefail
-          grep -q 'qwen/qwen3.6-27b' app/src/main/assets/interpreter_coach.html
-          grep -q 'qwen/qwen3.6-27b' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q 'AiPrivacyPreferences.hasAccepted' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q 'MicrophoneSessionCoordinator' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          grep -q 'interpreter_standard_arabic.js' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
-          if grep -qE 'interpreter_ai_provider.js|interpreter_ai_bootstrap.js|interpreter_professional_ai.js|NativeAiNetworkBridge' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt; then
-            echo 'The restored screen must not load the newer AI request layers.'
-            exit 1
-          fi
-          if grep -R -E 'litertlm|LiteRT-LM|MODEL_DOWNLOAD_SIZE_LABEL|INTERPRETER_AI_BASE_URL' app/src/main app/build.gradle.kts; then
-            echo 'The rollback must remain online-only.'
-            exit 1
-          fi
 
       - name: Run unit tests and Android lint
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug

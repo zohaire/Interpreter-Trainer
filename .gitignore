@@ -11,3 +11,11 @@ app/build
 backend/node_modules/
 backend/.env
 .env
+
+.env.*
+!.env.example
+**/service-account*.json
+**/google-services.json
+*.jks
+*.keystore
+**/node_modules/

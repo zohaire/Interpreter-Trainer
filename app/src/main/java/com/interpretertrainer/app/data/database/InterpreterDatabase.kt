@@ -19,11 +19,11 @@ abstract class InterpreterDatabase : RoomDatabase() {
             }
         }
 
-        fun create(context: Context): InterpreterDatabase =
+        fun create(context: Context, databaseName: String = "interpreter_trainer.db"): InterpreterDatabase =
             Room.databaseBuilder(
                 context.applicationContext,
                 InterpreterDatabase::class.java,
-                "interpreter_trainer.db"
+                databaseName
             )
                 .addMigrations(MIGRATION_1_2)
                 .build()

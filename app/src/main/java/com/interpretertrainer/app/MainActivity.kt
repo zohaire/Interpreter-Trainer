@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
                         }
                         Box(Modifier.weight(1f)) {
                             InterpreterTrainerApp(sessionViewModel=sessions, themeMode=themeMode,
-                                onThemeModeChange={ mode -> ThemePreferences.set(this,mode); themeMode=mode })
+                                onThemeModeChange={ mode -> ThemePreferences.set(this@MainActivity,mode); themeMode=mode })
                         }
                     }
                 }

@@ -16,7 +16,7 @@ The limiter is process-local. Deploy one replica initially, with an ingress requ
 
 ## Configure Android
 
-Build environment variables (public app configuration, not service secrets):
+Build environment variables (public app configuration, not service secrets; CI reads GitHub repository variables with these names):
 
 - INTERPRETER_BACKEND_URL: externally accessible HTTPS backend origin, no trailing route
 - FIREBASE_ANDROID_API_KEY, FIREBASE_ANDROID_APP_ID, FIREBASE_PROJECT_ID: registered Android application configuration
@@ -48,9 +48,9 @@ Verification: node --test backend/test/*.test.mjs. The server tests inject authe
 4. Cancel, rotate, navigate away, switch accounts and interrupt networking; verify history isolation and no stuck UI.
 5. Force primary failure and prove fallback with configured providers; force midstream failure and verify partial reply is retained and never replayed.
 6. Scan the resulting APK for server-only credentials; public Firebase/Meta application identifiers are expected.
-7. Release signing, provider terms, hosting capacity and operational budgets.
+7. Release signing, provider terms, hosting capacity and operational budgets. Only then set the repository variable INTERPRETER_LIVE_RELEASE_VERIFIED=true to allow the existing automatic preview publication job. It defaults to disabled for this upgrade.
 
-Local attempt to run clean/testDebugUnitTest/assembleDebug/assembleRelease stopped before compilation because the Gradle distribution host was unreachable. Local browser syntax checks passed; Chromium was absent, so browser execution must run in CI. Backend and client protocol tests are executable without external services.
+Local attempt to run clean/testDebugUnitTest/assembleDebug/assembleRelease stopped before compilation because the Gradle distribution host was unreachable. Local browser syntax checks passed; Chromium was absent. CI subsequently passed the actual coach browser suite with simulated native/auth/provider boundaries. Backend and client protocol tests are executable without external services.
 
 Official integration references:
 - https://firebase.google.com/docs/auth/android/facebook-login

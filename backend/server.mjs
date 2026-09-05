@@ -41,6 +41,7 @@ export function createServer({verifyToken, router, diagnostic = () => {}, genera
         if (size > 262144) throw new AiError('INVALID_REQUEST',413);
         chunks.push(chunk);
       }
+      req.setTimeout(0); // The provider/generation deadlines now govern the response.
       let body;
       try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new AiError('INVALID_REQUEST',400); }
       const conversation = validateRequest(body); requestId = body.requestId;

@@ -378,8 +378,7 @@
     let answer = '';
     let renderFrame = 0;
     try {
-      const system = `You are Interpreter AI, a fast professional coach for interpreters. Work especially well across Arabic, English and French. Help with simultaneous and consecutive interpreting, shadowing, transcription, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. In voice conversations, sound natural, concise and conversational rather than like a written report. Respond directly in the user's language. Never invent scores, transcripts, history or app facts. The authoritative app/context information below is reliable.\n\n${nativePracticeContext()}`;
-      const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
+      const conversation = [...history.slice(-8), { role:'user', content:text }];
       const stream = await TrainerBackend.chat(conversation, {
         stream:true,
         max_tokens:fromVoice ? 420 : 650,

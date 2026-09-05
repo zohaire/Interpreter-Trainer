@@ -29,6 +29,8 @@ internal class BackendAiBridge(private val context: Context) {
     @Volatile private var disposed = false
     private val owner = AccountSession.uid()
     private val history by lazy { com.interpretertrainer.app.auth.AccountHistoryStore(context, requireNotNull(owner)) }
+    @JavascriptInterface fun mayImportLegacyHistory(): Boolean = owner != null &&
+        context.getSharedPreferences("practice_owner", Context.MODE_PRIVATE).getString("legacy_uid", null) == owner
     @JavascriptInterface fun loadHistory(): String = try {
         if (owner == null || AccountSession.uid() != owner) "[]" else history.read()
     } catch (_: Exception) { "{\"error\":\"HISTORY_UNAVAILABLE\"}" }
@@ -50,7 +52,7 @@ internal class BackendAiBridge(private val context: Context) {
         if (disposed || !id.matches(Regex("[A-Za-z0-9_-]{1,80}")) || body.length>262144 || !active.compareAndSet(false,true)) return false
         requestId=id
         job=scope.launch {
-            val deadline = scope.launch { delay(80000); connection?.disconnect(); job?.cancel() }
+            val deadline = scope.launch { delay(80000); emitError(id,"TIMEOUT"); job?.cancel(); connection?.disconnect() }
             try {
                 if (!available()) { emitError(id,"CONFIGURATION_ERROR"); return@launch }
                 if (!online()) { emitError(id,"NETWORK_UNAVAILABLE"); return@launch }
@@ -60,6 +62,7 @@ internal class BackendAiBridge(private val context: Context) {
                     ?: throw IllegalStateException("Missing session")
                 ensureActive()
                 val payload=JSONObject(body).put("requestId",id)
+                val requestStart = android.os.SystemClock.elapsedRealtime()
                 val url=URL(BuildConfig.AI_BACKEND_URL.trimEnd('/')+"/v1/chat")
                 require(url.protocol=="https" && url.userInfo==null)
                 val http=url.openConnection() as HttpURLConnection
@@ -74,7 +77,7 @@ internal class BackendAiBridge(private val context: Context) {
                 debug("request_start",id)
                 http.outputStream.use { it.write(bytes) }
                 val status=http.responseCode
-                debug("http_$status",id)
+                debug("http_$status latencyMs=${android.os.SystemClock.elapsedRealtime()-requestStart}",id)
                 if(status !in 200..299) {
                     emitError(id, when(status) {401->"AUTH_EXPIRED";403->"EMAIL_UNVERIFIED";409->"BUSY";429->"RATE_LIMITED";400,413->"INVALID_REQUEST";else->"SERVER_ERROR"})
                     return@launch
@@ -104,7 +107,9 @@ internal class BackendAiBridge(private val context: Context) {
             } catch (_: TimeoutCancellationException) { emitError(id,"TIMEOUT")
             } catch (e: CancellationException) { throw e
             } catch (_: SocketTimeoutException) { emitError(id,"TIMEOUT")
-            } catch (_: java.io.IOException) { emitError(id,"NETWORK_UNAVAILABLE")
+            } catch (_: com.google.firebase.auth.FirebaseAuthException) { emitError(id,"AUTH_EXPIRED")
+            } catch (_: com.google.firebase.FirebaseNetworkException) { emitError(id,"NETWORK_UNAVAILABLE")
+            } catch (_: java.io.IOException) { if (isActive) emitError(id,"NETWORK_UNAVAILABLE")
             } catch (_: Exception) { emitError(id,"INVALID_RESPONSE")
             } finally { deadline.cancel(); connection?.disconnect(); connection=null; active.set(false) }
         }

@@ -63,6 +63,6 @@
   window.TrainerBackend={chat,cancel:()=>current?.cancel(),onEvent:(id,event)=>{if(current?.id===id)current.event(event)},
     errorMessage:error=>errors[error?.code]||errors.SERVER_ERROR};
   window.addEventListener('offline',()=>{current?.cancel();state('No internet connection')});
-  window.addEventListener('online',()=>{if(!current)state('Connected · send a message')});
+  window.addEventListener('online',()=>{if(!current)state('Network available · send a message')});
   window.addEventListener('pagehide',()=>current?.cancel());
 })();

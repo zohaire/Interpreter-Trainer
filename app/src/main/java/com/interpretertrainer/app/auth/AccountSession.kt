@@ -8,13 +8,15 @@ import com.interpretertrainer.app.BuildConfig
 
 /** Firebase owns token storage and refresh. Tokens never enter JavaScript or app preferences. */
 object AccountSession {
-    val configured: Boolean get() = listOf(BuildConfig.FIREBASE_API_KEY, BuildConfig.FIREBASE_APP_ID,
+    @Volatile private var initializationFailed = false
+    val configured: Boolean get() = !initializationFailed && listOf(BuildConfig.FIREBASE_API_KEY, BuildConfig.FIREBASE_APP_ID,
         BuildConfig.FIREBASE_PROJECT_ID).all { it.isNotBlank() }
     fun initialize(context: Context) {
         if (configured && FirebaseApp.getApps(context).isEmpty()) {
-            FirebaseApp.initializeApp(context, FirebaseOptions.Builder()
+            try { FirebaseApp.initializeApp(context, FirebaseOptions.Builder()
                 .setApiKey(BuildConfig.FIREBASE_API_KEY).setApplicationId(BuildConfig.FIREBASE_APP_ID)
                 .setProjectId(BuildConfig.FIREBASE_PROJECT_ID).build())
+            } catch (_: IllegalArgumentException) { initializationFailed = true }
         }
     }
     fun auth(): FirebaseAuth = FirebaseAuth.getInstance()

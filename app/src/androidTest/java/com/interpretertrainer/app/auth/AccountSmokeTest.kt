@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.interpretertrainer.app.MainActivity
@@ -17,11 +18,11 @@ class AccountSmokeTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
     @Test fun unconfiguredBuildLaunchesWithoutBypassingLoginAndSurvivesRecreation() {
-        compose.onNodeWithText("Welcome to Interpreter Trainer").assertIsDisplayed()
-        compose.onNodeWithText("Account service is not configured in this build.").assertIsDisplayed()
+        compose.onNodeWithText("Welcome to Interpreter Trainer").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Account service is not configured in this build.").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Sign In").assertIsNotEnabled()
         compose.activityRule.scenario.recreate()
-        compose.onNodeWithText("Welcome to Interpreter Trainer").assertIsDisplayed()
+        compose.onNodeWithText("Welcome to Interpreter Trainer").performScrollTo().assertIsDisplayed()
     }
 
     @Test fun conversationStorageIsEncryptedAndAccountScoped() {

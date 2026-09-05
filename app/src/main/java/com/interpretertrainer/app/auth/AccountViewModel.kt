@@ -26,6 +26,9 @@ class AccountViewModel : ViewModel() {
     val state = mutable.asStateFlow()
     private val auth = if (AccountSession.configured) AccountSession.auth() else null
     private val listener = FirebaseAuth.AuthStateListener { service ->
+        if (mutable.value.user?.uid != service.currentUser?.uid) {
+            com.interpretertrainer.app.ai.AiPracticeBridge.clear()
+        }
         mutable.value = mutable.value.copy(checking = false, user = service.currentUser)
     }
     init {

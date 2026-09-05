@@ -44,6 +44,8 @@ object AiPracticeBridge {
         return true
     }
 
+    fun clear() { _payload.value = null }
+
     fun consume(id: Long) {
         if (_payload.value?.id == id) _payload.value = null
     }

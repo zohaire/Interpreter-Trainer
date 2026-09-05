@@ -187,6 +187,7 @@ private class PracticeContextBridge(
     private val requestMicrophonePermission: () -> Unit,
     private val onOpenPractice: (String) -> Unit
 ) : RecognitionListener, TextToSpeech.OnInitListener {
+    private val accountOwner = com.interpretertrainer.app.auth.AccountSession.uid()
     val backend = BackendAiBridge(context)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val microphoneOwnerId = "ai-voice-${System.identityHashCode(this)}"
@@ -227,6 +228,7 @@ private class PracticeContextBridge(
 
     @JavascriptInterface
     fun sendToPractice(mode: String, text: String): Boolean {
+        if (accountOwner == null || com.interpretertrainer.app.auth.AccountSession.uid() != accountOwner) return false
         val accepted = AiPracticeBridge.sendToMode(mode, text)
         if (accepted) mainHandler.post { onOpenPractice(mode.trim().uppercase(Locale.ROOT)) }
         return accepted

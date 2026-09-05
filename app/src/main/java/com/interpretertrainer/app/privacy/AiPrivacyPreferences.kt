@@ -6,21 +6,22 @@ import android.content.Context
 object AiPrivacyPreferences {
     private const val PREFS = "interpreter_trainer_privacy"
     private const val KEY_AI_DISCLOSURE_VERSION = "ai_disclosure_version"
-    private const val CURRENT_DISCLOSURE_VERSION = 2
+    private const val CURRENT_DISCLOSURE_VERSION = 3
+    private fun preferencesName() = PREFS + "_" + com.interpretertrainer.app.auth.AccountSession.uid().orEmpty()
 
     fun hasAccepted(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        context.getSharedPreferences(preferencesName(), Context.MODE_PRIVATE)
             .getInt(KEY_AI_DISCLOSURE_VERSION, 0) >= CURRENT_DISCLOSURE_VERSION
 
     fun accept(context: Context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        context.getSharedPreferences(preferencesName(), Context.MODE_PRIVATE)
             .edit()
             .putInt(KEY_AI_DISCLOSURE_VERSION, CURRENT_DISCLOSURE_VERSION)
             .apply()
     }
 
     fun revoke(context: Context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        context.getSharedPreferences(preferencesName(), Context.MODE_PRIVATE)
             .edit()
             .remove(KEY_AI_DISCLOSURE_VERSION)
             .apply()

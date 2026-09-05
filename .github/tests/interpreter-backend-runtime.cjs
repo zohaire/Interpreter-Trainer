@@ -5,8 +5,7 @@ const {chromium}=require('playwright');
 (async()=>{
  const backend=fs.readFileSync('app/src/main/assets/interpreter_backend.js','utf8');
  const html=fs.readFileSync('app/src/main/assets/interpreter_coach.html','utf8').replace('<!--BACKEND_SCRIPT-->','<script>'+backend+'</script>');
- const kotlin=fs.readFileSync('app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt','utf8');
- const enhancement=kotlin.match(/private fun coachEnhancementScript\(\): String = """\n([\s\S]*?)\n"""\.trimIndent\(\)/)[1].replaceAll("${'$'}",'$');
+ const enhancement=fs.readFileSync('app/src/main/assets/interpreter_coach_runtime.js','utf8');
  new vm.Script(enhancement);new vm.Script(backend);
  for(const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi))new vm.Script(script[1]);
  const browser=await chromium.launch({headless:true});

@@ -5,10 +5,6 @@ import android.os.Environment
 import com.interpretertrainer.app.data.database.InterpreterDatabase
 import com.interpretertrainer.app.data.repository.RecordingFileStore
 import com.interpretertrainer.app.data.repository.SessionRepository
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 
 class InterpreterTrainerApplication : Application() {
 

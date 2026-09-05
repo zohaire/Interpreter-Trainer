@@ -17,6 +17,7 @@ import com.facebook.FacebookCallback
 import com.facebook.FacebookException
 import com.facebook.login.LoginManager
 import com.facebook.login.LoginResult
+import com.interpretertrainer.app.auth.AccountProfile
 import com.interpretertrainer.app.auth.AccountGate
 import com.interpretertrainer.app.auth.AccountViewModel
 import com.interpretertrainer.app.ui.InterpreterTrainerApp
@@ -49,9 +50,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }) { uid, logout ->
                     val sessions: SessionViewModel = viewModel(key = "sessions_$uid", factory = SessionViewModel.Factory(app.repositoryFor(uid)))
+                    var showAccount by remember(uid) { mutableStateOf(false) }
+                    if (showAccount) AccountProfile(onDismiss={showAccount=false}, onLogout=logout)
                     Column(Modifier.fillMaxSize()) {
                         Row(Modifier.fillMaxWidth().statusBarsPadding(), horizontalArrangement=Arrangement.End) {
-                            TextButton(onClick = logout) { Text("Sign out") }
+                            TextButton(onClick = {showAccount=true}) { Text("Account") }
                         }
                         Box(Modifier.weight(1f)) {
                             InterpreterTrainerApp(sessionViewModel=sessions, themeMode=themeMode,

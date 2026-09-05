@@ -1,3 +1,9 @@
+# Account and backend upgrade notice
+
+This branch uses Firebase Authentication and optional official Facebook Login. UID, display name, email and an optional profile photo come from the authentication provider. Practice history stays in an account-specific local database. New AI conversations are encrypted locally with Android Keystore. Chat and evaluation text plus limited practice context are transmitted through the authenticated app backend to its configured model provider. Native speech services may process voice according to the device configuration. No advertising event collection is enabled by this integration. The final deployed provider and operator contact must be identified before public release.
+
+The previous release notice below is retained for migration reference; references to Puter do not describe this branch.
+
 # Privacy Policy — Interpreter Trainer
 
 Last updated: 4 September 2026

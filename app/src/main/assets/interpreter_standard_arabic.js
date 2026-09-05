@@ -34,41 +34,6 @@
     window.nativePracticeContext = wrappedContext;
   }
 
-  // Also guard direct Puter requests such as evaluation calls that do not use practice context.
-  const applyArabicPolicy = request => {
-    if (!Array.isArray(request)) return;
-    const system = request.find(item => item && item.role === 'system' && typeof item.content === 'string');
-    if (system && !system.content.includes('Modern Standard Arabic (العربية الفصحى) only')) {
-      system.content += `\n\nARABIC LANGUAGE POLICY:\n${MSA_INSTRUCTION}`;
-    } else if (!system) {
-      request.unshift({ role: 'system', content: MSA_INSTRUCTION });
-    }
-  };
-  window.__applyInterpreterArabicPolicy = applyArabicPolicy;
-  const installChatGuard = () => {
-    if (!window.puter?.ai?.chat || window.puter.ai.chat.__msaWrapped) return false;
-
-    const originalChat = window.puter.ai.chat.bind(window.puter.ai);
-    const wrapped = async (...args) => {
-      applyArabicPolicy(args[0]);
-      return originalChat(...args);
-    };
-    wrapped.__msaWrapped = true;
-    try {
-      window.puter.ai.chat = wrapped;
-      return window.puter.ai.chat === wrapped || window.puter.ai.chat.__msaWrapped === true;
-    } catch (_) {
-      return false;
-    }
-  };
-
-  if (!installChatGuard()) {
-    let attempts = 0;
-    const timer = setInterval(() => {
-      attempts += 1;
-      if (installChatGuard() || attempts >= 40) clearInterval(timer);
-    }, 150);
-  }
-
+  // The backend owns the authoritative language policy for chat and evaluation.
   return 'ready';
 })();

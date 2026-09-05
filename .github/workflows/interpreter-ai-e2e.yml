@@ -1,12 +1,9 @@
-name: Classic Interpreter AI integration
-
+name: Authenticated Interpreter AI integration
 on:
   workflow_dispatch:
   workflow_call:
-
 permissions:
   contents: read
-
 jobs:
   browser-integration:
     runs-on: ubuntu-latest
@@ -16,26 +13,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Check restored model in the live provider catalog
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --location --fail --silent --show-error --max-time 45 \
-            https://api.puter.com/puterai/chat/models/details --output /tmp/puter-models.json
-          node -e "const {models}=require('/tmp/puter-models.json'); if(!models.some(m=>m.id==='qwen/qwen3.6-27b'||(m.aliases||[]).includes('qwen/qwen3.6-27b'))) throw Error('Restored model missing from live catalog');"
+      - name: Distribution configuration regression tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+      - name: Backend behavior tests
+        run: node --test backend/test/*.test.mjs
       - name: Install browser test runtime
-        working-directory: /tmp
         run: |
-          mkdir -p /tmp/puter-ci
-          cd /tmp/puter-ci
-          npm init -y >/dev/null
-          npm install --silent playwright@1.55.0
-          npx playwright install --with-deps chromium
-      - name: Verify restored runtime and Arabic observer
+          npm install --prefix /tmp/coach-ci playwright@1.55.0
+          /tmp/coach-ci/node_modules/.bin/playwright install --with-deps chromium
+      - name: Exercise actual coach document and Android-injected JavaScript
         env:
-          NODE_PATH: /tmp/puter-ci/node_modules
-        run: |
-          node .github/tests/interpreter-arabic-observer.cjs
-          node .github/tests/interpreter-classic-runtime.cjs
-      - name: Explain validation boundary
-        run: echo 'The catalog check is live. Browser tests simulate the SDK and do not prove a signed-in user can receive a live answer.' >> "$GITHUB_STEP_SUMMARY"
+          NODE_PATH: /tmp/coach-ci/node_modules
+        run: node .github/tests/interpreter-backend-runtime.cjs
+      - name: Validation boundary
+        run: echo 'Backend and browser tests simulate external providers and Firebase tokens. Live Firebase, Facebook and deployed provider checks remain release gates.' >> "$GITHUB_STEP_SUMMARY"

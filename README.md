@@ -1,3 +1,5 @@
+> **Upgrade branch:** Account authentication and AI now require app-owned Firebase/Meta and backend configuration. This is an integration candidate, not a verified release. See [secure AI setup and verification](docs/SECURE_AI_UPGRADE.md). Older Puter instructions below describe the previous release and do not apply to this branch.
+
 # Interpreter Trainer
 
 Interpreter Trainer is a production-oriented Android 12+ practice studio for Arabic, English and French interpreters. It combines guided practice, recording, transcription, review and an optional online AI coach in one Compose application.

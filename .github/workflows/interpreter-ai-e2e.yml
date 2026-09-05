@@ -13,6 +13,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Distribution configuration regression tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
       - name: Backend behavior tests
         run: node --test backend/test/*.test.mjs
       - name: Install browser test runtime

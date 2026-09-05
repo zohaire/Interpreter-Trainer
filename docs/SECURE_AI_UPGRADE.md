@@ -57,3 +57,7 @@ Official integration references:
 - https://firebase.google.com/docs/auth/android/password-auth
 - https://firebase.google.com/docs/auth/admin/verify-id-tokens
 - https://docs.ollama.com/api/openai-compatibility
+
+## Disabled login screen incident
+
+An unconfigured CI APK was installable but could not accept login input. That was a configuration-blocked app, not a working authentication test. Distribution now fails before packaging or uploading APKs when required Firebase, Facebook or backend variables are missing. Developer emulator tests run independently and upload reports only. This presence check cannot prove service activation; real login and inference still require the live release gates. The already installed APK must be replaced after configuration; waiting or changing device settings cannot populate its compiled settings.

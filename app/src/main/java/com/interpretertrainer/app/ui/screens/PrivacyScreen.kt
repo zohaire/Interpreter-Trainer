@@ -41,15 +41,15 @@ fun PrivacyScreen(onBack: () -> Unit) {
             )
             PrivacySection(
                 "Online Interpreter AI",
-                "The coach requires internet access. Messages, evaluation material and up to five recent practice summaries may be sent to Puter and its selected Qwen model only after you accept the in-app disclosure. Puter authentication and provider policies apply."
+                "The coach requires internet access. Messages, evaluation material and up to five recent practice summaries may be sent to the app’s AI backend and its configured model provider only after you accept the in-app disclosure. No email or Facebook sign-in is required."
             )
             PrivacySection(
                 "Voice features",
-                "Android speech recognition may use your device's configured online speech service. When the device recognizer is unavailable, a voice turn may be sent through Puter for online transcription. AI reply text is sent through Puter for neural speech generation; Android text-to-speech is the fallback."
+                "Android speech recognition may use your device's configured online speech service. Spoken replies use Android text-to-speech and installed voices."
             )
             PrivacySection(
                 "Your control",
-                "You can continue using core practice modes without opening Interpreter AI. Clearing access below removes this app's AI consent, cookies and embedded web storage. It does not delete a Puter account or data held by external providers."
+                "You can continue using core practice modes without opening Interpreter AI. Clearing access below removes this app's AI consent, cookies and embedded web storage. It does not delete data held by external AI providers."
             )
 
             OutlinedButton(

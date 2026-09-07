@@ -8,16 +8,15 @@ import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import com.interpretertrainer.app.BuildConfig
-import com.interpretertrainer.app.auth.AccountSession
+import com.interpretertrainer.app.auth.LocalProfile
 import kotlinx.coroutines.*
-import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Bundled, network-isolated page only. Firebase tokens never cross the JS bridge. */
+/** Bundled, network-isolated page only. No login or provider credentials are required from the user. */
 internal class BackendAiBridge(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val handler = Handler(Looper.getMainLooper())
@@ -27,23 +26,22 @@ internal class BackendAiBridge(private val context: Context) {
     @Volatile private var job: Job? = null
     @Volatile private var requestId: String? = null
     @Volatile private var disposed = false
-    private val owner = AccountSession.uid()
-    private val history by lazy { com.interpretertrainer.app.auth.AccountHistoryStore(context, requireNotNull(owner)) }
-    @JavascriptInterface fun mayImportLegacyHistory(): Boolean = owner != null &&
-        context.getSharedPreferences("practice_owner", Context.MODE_PRIVATE).getString("legacy_uid", null) == owner
+    private val owner = LocalProfile.id
+    private val history by lazy { com.interpretertrainer.app.auth.AccountHistoryStore(context, owner) }
+    @JavascriptInterface fun mayImportLegacyHistory(): Boolean = context.getSharedPreferences("practice_owner", Context.MODE_PRIVATE).getString("legacy_uid", null) == owner
     @JavascriptInterface fun loadHistory(): String = try {
-        if (owner == null || AccountSession.uid() != owner) "[]" else history.read()
+        if (LocalProfile.id != owner) "[]" else history.read()
     } catch (_: Exception) { "{\"error\":\"HISTORY_UNAVAILABLE\"}" }
     @JavascriptInterface fun saveHistory(value: String): Boolean = try {
-        if (owner == null || AccountSession.uid() != owner) false else {
+        if (LocalProfile.id != owner) false else {
             val array = org.json.JSONArray(value)
             require(array.length() <= 20)
             history.save(value); true
         }
     } catch (_: Exception) { false }
     fun attach(webView: WebView) { view=webView }
-    @JavascriptInterface fun accountId(): String = owner.orEmpty()
-    @JavascriptInterface fun available(): Boolean = BuildConfig.AI_BACKEND_URL.startsWith("https://") && owner != null
+    @JavascriptInterface fun accountId(): String = owner
+    @JavascriptInterface fun available(): Boolean = BuildConfig.AI_BACKEND_URL.startsWith("https://")
     @JavascriptInterface fun online(): Boolean {
         val manager = context.getSystemService(ConnectivityManager::class.java)
         return manager.getNetworkCapabilities(manager.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
@@ -56,10 +54,6 @@ internal class BackendAiBridge(private val context: Context) {
             try {
                 if (!available()) { emitError(id,"CONFIGURATION_ERROR"); return@launch }
                 if (!online()) { emitError(id,"NETWORK_UNAVAILABLE"); return@launch }
-                val user=AccountSession.auth().currentUser
-                if(user==null || user.uid!=owner) { emitError(id,"AUTH_EXPIRED"); return@launch }
-                val token=withTimeout(15000) { user.getIdToken(false).await().token }
-                    ?: throw IllegalStateException("Missing session")
                 ensureActive()
                 val payload=JSONObject(body).put("requestId",id)
                 val requestStart = android.os.SystemClock.elapsedRealtime()
@@ -69,7 +63,6 @@ internal class BackendAiBridge(private val context: Context) {
                 connection=http
                 http.requestMethod="POST"; http.instanceFollowRedirects=false
                 http.connectTimeout=10000; http.readTimeout=25000; http.doOutput=true; http.useCaches=false
-                http.setRequestProperty("Authorization","Bearer $token")
                 http.setRequestProperty("Content-Type","application/json; charset=utf-8")
                 http.setRequestProperty("Accept","application/x-ndjson")
                 val bytes=payload.toString().toByteArray(Charsets.UTF_8)
@@ -79,7 +72,7 @@ internal class BackendAiBridge(private val context: Context) {
                 val status=http.responseCode
                 debug("http_$status latencyMs=${android.os.SystemClock.elapsedRealtime()-requestStart}",id)
                 if(status !in 200..299) {
-                    emitError(id, when(status) {401->"AUTH_EXPIRED";403->"EMAIL_UNVERIFIED";409->"BUSY";429->"RATE_LIMITED";400,413->"INVALID_REQUEST";else->"SERVER_ERROR"})
+                    emitError(id, when(status) {401,403->"CONFIGURATION_ERROR";409->"BUSY";429->"RATE_LIMITED";400,413->"INVALID_REQUEST";else->"SERVER_ERROR"})
                     return@launch
                 }
                 if(!http.contentType.orEmpty().startsWith("application/x-ndjson")) { emitError(id,"INVALID_RESPONSE"); return@launch }
@@ -107,8 +100,6 @@ internal class BackendAiBridge(private val context: Context) {
             } catch (_: TimeoutCancellationException) { emitError(id,"TIMEOUT")
             } catch (e: CancellationException) { throw e
             } catch (_: SocketTimeoutException) { emitError(id,"TIMEOUT")
-            } catch (_: com.google.firebase.auth.FirebaseAuthException) { emitError(id,"AUTH_EXPIRED")
-            } catch (_: com.google.firebase.FirebaseNetworkException) { emitError(id,"NETWORK_UNAVAILABLE")
             } catch (_: java.io.IOException) { if (isActive) emitError(id,"NETWORK_UNAVAILABLE")
             } catch (_: Exception) { emitError(id,"INVALID_RESPONSE")
             } finally { deadline.cancel(); connection?.disconnect(); connection=null; active.set(false) }
@@ -117,7 +108,7 @@ internal class BackendAiBridge(private val context: Context) {
     }
     private fun emitError(id: String, code: String) { debug("error_$code",id); emit(id,JSONObject().put("type","error").put("code",code)) }
     private fun emit(id: String,event: JSONObject) { handler.post {
-        if(!disposed && id==requestId && AccountSession.uid()==owner) view?.evaluateJavascript(
+        if(!disposed && id==requestId && LocalProfile.id==owner) view?.evaluateJavascript(
             "window.TrainerBackend?.onEvent(${JSONObject.quote(id)},$event)",null)
     } }
     private fun debug(event: String,id: String) { if(BuildConfig.DEBUG) android.util.Log.d("InterpreterAI","event=$event requestId=$id") }

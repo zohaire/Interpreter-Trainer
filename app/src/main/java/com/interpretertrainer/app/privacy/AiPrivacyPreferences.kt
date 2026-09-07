@@ -7,7 +7,7 @@ object AiPrivacyPreferences {
     private const val PREFS = "interpreter_trainer_privacy"
     private const val KEY_AI_DISCLOSURE_VERSION = "ai_disclosure_version"
     private const val CURRENT_DISCLOSURE_VERSION = 3
-    private fun preferencesName() = PREFS + "_" + com.interpretertrainer.app.auth.AccountSession.uid().orEmpty()
+    private fun preferencesName() = PREFS + "_" + com.interpretertrainer.app.auth.LocalProfile.id
 
     fun hasAccepted(context: Context): Boolean =
         context.getSharedPreferences(preferencesName(), Context.MODE_PRIVATE)

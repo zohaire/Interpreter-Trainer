@@ -1,4 +1,4 @@
-name: Authenticated Interpreter AI integration
+name: Direct-access Interpreter AI integration
 on:
   workflow_dispatch:
   workflow_call:
@@ -26,4 +26,4 @@ jobs:
           NODE_PATH: /tmp/coach-ci/node_modules
         run: node .github/tests/interpreter-backend-runtime.cjs
       - name: Validation boundary
-        run: echo 'Backend and browser tests simulate external providers and Firebase tokens. Live Firebase, Facebook and deployed provider checks remain release gates.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'Backend and browser tests simulate external AI providers. Live deployed provider checks remain release gates.' >> "$GITHUB_STEP_SUMMARY"

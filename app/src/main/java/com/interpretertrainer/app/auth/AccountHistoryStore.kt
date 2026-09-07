@@ -10,7 +10,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Account-scoped encrypted conversation storage. No Firebase credentials are copied here. */
+/** Profile-scoped encrypted conversation storage. */
 internal class AccountHistoryStore(context: Context, uid: String) {
     private val id=java.security.MessageDigest.getInstance("SHA-256").digest(uid.toByteArray()).joinToString(""){"%02x".format(it)}
     private val preferences=context.getSharedPreferences("coach_$id",Context.MODE_PRIVATE)

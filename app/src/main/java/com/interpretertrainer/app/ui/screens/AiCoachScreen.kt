@@ -109,7 +109,7 @@ private fun AiPrivacyDisclosure(onBack: () -> Unit, onAccept: () -> Unit) {
                 style = MaterialTheme.typography.headlineSmall
             )
             Text(
-                "To provide chat and evaluation, the app sends your messages, submitted evaluation material and up to five recent practice summaries—including saved notes or feedback—to the app’s authenticated backend and its configured AI provider.",
+                "To provide chat and evaluation, the app sends your messages, submitted evaluation material and up to five recent practice summaries—including saved notes or feedback—to the app’s AI backend and its configured AI provider.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
@@ -187,7 +187,7 @@ private class PracticeContextBridge(
     private val requestMicrophonePermission: () -> Unit,
     private val onOpenPractice: (String) -> Unit
 ) : RecognitionListener, TextToSpeech.OnInitListener {
-    private val accountOwner = com.interpretertrainer.app.auth.AccountSession.uid()
+    private val accountOwner = com.interpretertrainer.app.auth.LocalProfile.id
     val backend = BackendAiBridge(context)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val microphoneOwnerId = "ai-voice-${System.identityHashCode(this)}"
@@ -220,7 +220,7 @@ private class PracticeContextBridge(
 
     @JavascriptInterface
     fun getPracticeContext(): String {
-        val uid = com.interpretertrainer.app.auth.AccountSession.uid() ?: return ""
+        val uid = com.interpretertrainer.app.auth.LocalProfile.id
         val languages = context.getSharedPreferences("preferences_$uid", Context.MODE_PRIVATE)
             .getStringSet("languages", setOf("English", "العربية الفصحى", "Français")).orEmpty()
         return contextValue + "\nPreferred languages: " + languages.joinToString(", ")
@@ -228,7 +228,7 @@ private class PracticeContextBridge(
 
     @JavascriptInterface
     fun sendToPractice(mode: String, text: String): Boolean {
-        if (accountOwner == null || com.interpretertrainer.app.auth.AccountSession.uid() != accountOwner) return false
+        if (com.interpretertrainer.app.auth.LocalProfile.id != accountOwner) return false
         val accepted = AiPracticeBridge.sendToMode(mode, text)
         if (accepted) mainHandler.post { onOpenPractice(mode.trim().uppercase(Locale.ROOT)) }
         return accepted

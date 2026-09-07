@@ -4,18 +4,24 @@ import {once} from 'node:events';
 import {createServer} from '../server.mjs';
 import {AiError} from '../ai.mjs';
 async function fixture(t,options={}) {
- const server=createServer({verifyToken:async token=>{if(token!=='test-token')throw Error();return {uid:'one',email_verified:true}},router:{async *stream(){yield {type:'delta',text:'reply'}}},...options});
+ const server=createServer({router:{async *stream(){yield {type:'delta',text:'reply'}}},...options});
  server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>{server.closeAllConnections();server.close()});
  const url=`http://127.0.0.1:${server.address().port}/v1/chat`;
- return (body={requestId:'request1',messages:[{role:'user',content:'مرحبا'}]},token='test-token')=>fetch(url,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
+ return (body={requestId:'request1',messages:[{role:'user',content:'مرحبا'}]},headers={})=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)});
 }
-test('authenticated request streams state, text, completion',async t=>{
+test('request without credentials streams state, text, completion',async t=>{
  const request=await fixture(t);const response=await request();assert.equal(response.status,200);
  const events=(await response.text()).trim().split('\n').map(JSON.parse);assert.deepEqual(events.map(x=>x.type),['state','delta','done']);
 });
-test('invalid or unverified session cannot reach model',async t=>{
- let calls=0;const request=await fixture(t,{router:{async *stream(){calls++}}});assert.equal((await request(undefined,'wrong')).status,401);assert.equal(calls,0);
- const unverified=await fixture(t,{verifyToken:async()=>({uid:'u',firebase:{sign_in_provider:'password'},email_verified:false})});assert.equal((await unverified()).status,403);
+test('no email, Facebook token or Firebase session is required',async t=>{
+ let calls=0;
+ const request=await fixture(t,{router:{async *stream(){calls++;yield {type:'delta',text:'Hello'}}}});
+ const response=await request();await response.text();assert.equal(response.status,200);assert.equal(calls,1);
+});
+test('spoofed forwarding headers cannot reset the anonymous quota',async t=>{
+ const request=await fixture(t);
+ for(let i=0;i<12;i++) await (await request(undefined,{'X-Forwarded-For':`192.0.2.${i}`})).text();
+ assert.equal((await request(undefined,{'X-Forwarded-For':'198.51.100.1'})).status,429);
 });
 test('malformed requests rejected before generation',async t=>{const request=await fixture(t);assert.equal((await request({messages:[]})).status,400)});
 test('concurrent messages are rejected and recover after completion',async t=>{

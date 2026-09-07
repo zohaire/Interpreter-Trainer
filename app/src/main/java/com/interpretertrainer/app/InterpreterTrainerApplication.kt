@@ -13,7 +13,7 @@ class InterpreterTrainerApplication : Application() {
     @Synchronized
     fun repositoryFor(uid: String): SessionRepository = repositories.getOrPut(uid) {
         val owner = getSharedPreferences("practice_owner", MODE_PRIVATE)
-        // Preserve pre-account practice data for the first verified account on this installation.
+        // Preserve pre-account practice data for the local profile on this installation.
         val legacyOwner = owner.getString("legacy_uid", null) ?: uid.also {
             owner.edit().putString("legacy_uid", it).apply()
         }
@@ -27,7 +27,6 @@ class InterpreterTrainerApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        com.interpretertrainer.app.auth.AccountSession.initialize(this)
         // Do not prune shared recordings using only one account's database.
     }
 }

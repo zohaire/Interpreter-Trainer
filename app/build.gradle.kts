@@ -34,12 +34,6 @@ android {
             ?: "1.0.0-preview.1"
 
         buildConfigField("String", "AI_BACKEND_URL", quoted(publicConfig("INTERPRETER_BACKEND_URL")))
-        buildConfigField("String", "FIREBASE_API_KEY", quoted(publicConfig("FIREBASE_ANDROID_API_KEY")))
-        buildConfigField("String", "FIREBASE_APP_ID", quoted(publicConfig("FIREBASE_ANDROID_APP_ID")))
-        buildConfigField("String", "FIREBASE_PROJECT_ID", quoted(publicConfig("FIREBASE_PROJECT_ID")))
-        resValue("string", "facebook_app_id", publicConfig("FACEBOOK_APP_ID").ifBlank { "0" })
-        resValue("string", "facebook_client_token", publicConfig("FACEBOOK_CLIENT_TOKEN").ifBlank { "unconfigured" })
-        resValue("string", "fb_login_protocol_scheme", "fb" + publicConfig("FACEBOOK_APP_ID").ifBlank { "0" })
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -106,10 +100,6 @@ android {
 }
 
 dependencies {
-    implementation(platform("com.google.firebase:firebase-bom:34.7.0"))
-    implementation("com.google.firebase:firebase-auth")
-    implementation("com.facebook.android:facebook-login:18.1.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0")
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)

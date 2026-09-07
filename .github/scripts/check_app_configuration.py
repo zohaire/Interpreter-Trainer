@@ -7,11 +7,7 @@ import os
 import sys
 from urllib.parse import urlsplit
 
-REQUIRED = (
-    'INTERPRETER_BACKEND_URL', 'FIREBASE_ANDROID_API_KEY',
-    'FIREBASE_ANDROID_APP_ID', 'FIREBASE_PROJECT_ID',
-    'FACEBOOK_APP_ID', 'FACEBOOK_CLIENT_TOKEN',
-)
+REQUIRED = ('INTERPRETER_BACKEND_URL',)
 
 def problems(env):
     errors = [f'Missing repository variable: {name}' for name in REQUIRED
@@ -31,7 +27,7 @@ def problems(env):
 if __name__ == '__main__':
     errors = problems(os.environ)
     if errors:
-        print('APK distribution blocked: account/AI service setup is incomplete.', file=sys.stderr)
+        print('APK distribution blocked: AI backend setup is incomplete.', file=sys.stderr)
         print('\n'.join(errors), file=sys.stderr)
         print('See docs/SECURE_AI_UPGRADE.md. No configuration values were printed.', file=sys.stderr)
         sys.exit(1)

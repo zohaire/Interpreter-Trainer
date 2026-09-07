@@ -1,7 +1,7 @@
 (() => {
   const errors = {
     NETWORK_UNAVAILABLE:'No internet connection or service unreachable. Please retry.',
-    AUTH_EXPIRED:'Your session expired. Sign out and sign in again.',
+    AUTH_EXPIRED:'The AI service rejected the connection. Please try again later.',
     EMAIL_UNVERIFIED:'Verify your email before using AI.',
     MODEL_UNAVAILABLE:'The model is unavailable. Please retry later.',
     RATE_LIMITED:'The AI allowance is temporarily exhausted. Please retry later.',

@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   puter-ai-browser-test:
-    name: Verify restored classic Interpreter AI
+    name: Verify Interpreter AI experiences
     uses: ./.github/workflows/interpreter-ai-e2e.yml
 
   build:
@@ -48,17 +48,18 @@ jobs:
             -storepass android -alias androiddebugkey >/dev/null
           echo "Stable Interpreter Trainer development signing key installed."
 
-      - name: Guard restored online coach and data compatibility
+      - name: Guard online AI and data compatibility
         shell: bash
         run: |
           set -euo pipefail
           grep -q 'qwen/qwen3.6-27b' app/src/main/assets/interpreter_coach.html
+          grep -q 'qwen/qwen3.6-27b' app/src/main/assets/interpreter_inline_generator.html
           grep -q 'qwen/qwen3.6-27b' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'AiPrivacyPreferences.hasAccepted' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'MicrophoneSessionCoordinator' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'interpreter_standard_arabic.js' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           if grep -qE 'interpreter_ai_provider.js|interpreter_ai_bootstrap.js|interpreter_professional_ai.js|NativeAiNetworkBridge' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt; then
-            echo 'The restored screen must not load the newer AI request layers.'
+            echo 'The online AI screens must not load the incompatible request layers.'
             exit 1
           fi
           if grep -R -E 'litertlm|LiteRT-LM|MODEL_DOWNLOAD_SIZE_LABEL|INTERPRETER_AI_BASE_URL' app/src/main app/build.gradle.kts; then

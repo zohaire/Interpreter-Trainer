@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.interpretertrainer.app.ai.AiPracticeBridge
+import com.interpretertrainer.app.ai.PracticeGenerationMode
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.model.LanguageOption
 import com.interpretertrainer.app.model.PracticeMode
@@ -30,8 +31,7 @@ import com.interpretertrainer.app.viewmodel.SessionViewModel
 @Composable
 fun LiveTranscriptionScreen(
     onBack: () -> Unit,
-    sessionViewModel: SessionViewModel,
-    onOpenAiCoach: () -> Unit
+    sessionViewModel: SessionViewModel
 ) {
     val context = LocalContext.current
     val speech = remember { SpeechRecognizerManager(context.applicationContext) }
@@ -40,6 +40,7 @@ fun LiveTranscriptionScreen(
     var language by rememberSaveable { mutableStateOf(LanguageOption.ENGLISH_US) }
     var startedAt by rememberSaveable { mutableLongStateOf(0L) }
     var aiReferenceText by rememberSaveable { mutableStateOf("") }
+    var showAiGenerator by rememberSaveable { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
@@ -102,20 +103,21 @@ fun LiveTranscriptionScreen(
                     Column {
                         Text("Practice source", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Optional reference material from Interpreter AI",
+                            "Optional generated or pasted reference material",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    FilledTonalIconButton(onClick = onOpenAiCoach) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = "Open Interpreter AI")
+                    FilledTonalButton(onClick = { showAiGenerator = true }) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                        Text(" Generate")
                     }
                 }
                 OutlinedTextField(
                     value = aiReferenceText,
                     onValueChange = { aiReferenceText = it },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 105.dp),
-                    placeholder = { Text("Send a passage from Interpreter AI or paste one here") },
+                    placeholder = { Text("Generate a passage here or paste one") },
                     shape = RoundedCornerShape(18.dp)
                 )
             }
@@ -183,7 +185,7 @@ fun LiveTranscriptionScreen(
                             targetLanguage = language.tag,
                             startedAt = startedAt.takeIf { it > 0 } ?: now,
                             durationMillis = if (startedAt > 0) now - startedAt else 0,
-                            sourceName = if (aiReferenceText.isNotBlank()) "AI Coach reference text" else null,
+                            sourceName = if (aiReferenceText.isNotBlank()) "AI-generated reference text" else null,
                             transcript = state.finalText,
                             notes = if (aiReferenceText.isNotBlank()) "Reference text:\n$aiReferenceText" else "",
                             segmentDurationSeconds = null,
@@ -196,4 +198,13 @@ fun LiveTranscriptionScreen(
             Spacer(Modifier.height(8.dp))
         }
     }
+
+    InlineAiTextGenerator(
+        visible = showAiGenerator,
+        mode = PracticeGenerationMode.TRANSCRIPTION,
+        sourceLanguage = language,
+        targetLanguage = language,
+        onDismiss = { showAiGenerator = false },
+        onGenerated = { generated -> aiReferenceText = generated }
+    )
 }

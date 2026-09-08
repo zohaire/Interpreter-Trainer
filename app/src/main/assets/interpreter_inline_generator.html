@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://js.puter.com/v2/"></script>
+</head>
+<body>
+<script>
+  const INLINE_MODEL = 'qwen/qwen3.6-27b';
+
+  function nativeCall(name, value) {
+    try { window.InlineAiNative?.[name]?.(String(value ?? '')); } catch (_) {}
+  }
+
+  async function ensureConnected() {
+    if (!window.puter) throw new Error('The online AI service did not load. Check your connection and try again.');
+    if (!puter.auth.isSignedIn()) {
+      await puter.auth.signIn({ attempt_temp_user_creation: true });
+    }
+  }
+
+  window.generatePracticeText = async function(prompt, maxTokens) {
+    try {
+      await ensureConnected();
+      const stream = await puter.ai.chat(
+        [
+          {
+            role: 'system',
+            content: 'You generate clean source passages for professional interpreter practice. Follow the output format exactly and never add commentary.'
+          },
+          { role: 'user', content: String(prompt || '') }
+        ],
+        {
+          model: INLINE_MODEL,
+          stream: true,
+          max_tokens: Math.max(200, Math.min(Number(maxTokens) || 600, 1000)),
+          temperature: 0.55
+        }
+      );
+
+      let answer = '';
+      for await (const part of stream) {
+        if (part?.type === 'error') {
+          throw new Error(part?.error?.message || part?.message || 'The AI stream failed.');
+        }
+        answer += typeof part === 'string'
+          ? part
+          : (typeof part?.text === 'string'
+              ? part.text
+              : (typeof part?.delta?.content === 'string' ? part.delta.content : ''));
+      }
+
+      if (!answer.trim()) throw new Error('The AI returned an empty passage.');
+      nativeCall('onGenerated', answer);
+    } catch (error) {
+      nativeCall('onError', error?.message || error || 'Could not generate a passage.');
+    }
+  };
+
+  nativeCall('onReady', 'ready');
+</script>
+</body>
+</html>
+

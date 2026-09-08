@@ -34,7 +34,7 @@
     window.nativePracticeContext = wrappedContext;
   }
 
-  // Also guard direct Puter requests such as evaluation calls that do not use practice context.
+  // Also guard direct Puter requests that do not use practice context.
   const applyArabicPolicy = request => {
     if (!Array.isArray(request)) return;
     const system = request.find(item => item && item.role === 'system' && typeof item.content === 'string');

@@ -41,7 +41,7 @@ fun PrivacyScreen(onBack: () -> Unit) {
             )
             PrivacySection(
                 "Online Interpreter AI",
-                "The coach requires internet access. Messages, evaluation material and up to five recent practice summaries may be sent to Puter and its selected Qwen model only after you accept the in-app disclosure. Puter authentication and provider policies apply."
+                "Interpreter AI requires internet access. Coach messages, inline generation choices and up to five recent practice summaries may be sent to Puter and its selected Qwen model only after you accept the in-app disclosure. Puter authentication and provider policies apply."
             )
             PrivacySection(
                 "Voice features",

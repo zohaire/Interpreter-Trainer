@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 import com.interpretertrainer.app.ai.AiPracticeBridge
+import com.interpretertrainer.app.ai.PracticeGenerationMode
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.media.MediaController
 import com.interpretertrainer.app.media.MediaLinkResolver
@@ -31,8 +32,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun ConsecutiveScreen(
     onBack: () -> Unit,
-    sessionViewModel: SessionViewModel,
-    onOpenAiCoach: () -> Unit
+    sessionViewModel: SessionViewModel
 ) {
     val context = LocalContext.current
     val media = remember { MediaController(context) }
@@ -50,6 +50,7 @@ fun ConsecutiveScreen(
     var sourceLang by rememberSaveable { mutableStateOf(LanguageOption.ENGLISH_US) }
     var targetLang by rememberSaveable { mutableStateOf(LanguageOption.FRENCH_FRANCE) }
     var position by remember { mutableLongStateOf(0L) }
+    var showAiGenerator by rememberSaveable { mutableStateOf(false) }
 
     val isWebSource = !webSourceUrl.isNullOrBlank()
     val hasAiSource = aiSourceText.isNotBlank()
@@ -187,9 +188,9 @@ fun ConsecutiveScreen(
                         modifier = Modifier.weight(1f)
                     )
                     ModernActionButton(
-                        text = "AI",
+                        text = "Generate",
                         icon = Icons.Default.AutoAwesome,
-                        onClick = onOpenAiCoach,
+                        onClick = { showAiGenerator = true },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -212,7 +213,7 @@ fun ConsecutiveScreen(
                         }
                     },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
-                    placeholder = { Text("Paste a source or send a passage from Interpreter AI") },
+                    placeholder = { Text("Generate a source here or paste one") },
                     shape = RoundedCornerShape(18.dp)
                 )
                 sourceError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -334,7 +335,7 @@ fun ConsecutiveScreen(
                             targetLanguage = targetLang.tag,
                             startedAt = System.currentTimeMillis() - duration,
                             durationMillis = duration,
-                            sourceName = sourceName ?: if (hasAiSource) "AI Coach practice text" else null,
+                            sourceName = sourceName ?: if (hasAiSource) "AI-generated practice text" else null,
                             transcript = transcript,
                             notes = notes,
                             segmentDurationSeconds = if (isWebSource || hasAiSource) null else segmentSeconds,
@@ -347,4 +348,21 @@ fun ConsecutiveScreen(
             Spacer(Modifier.height(8.dp))
         }
     }
+
+    InlineAiTextGenerator(
+        visible = showAiGenerator,
+        mode = PracticeGenerationMode.CONSECUTIVE,
+        sourceLanguage = sourceLang,
+        targetLanguage = targetLang,
+        onDismiss = { showAiGenerator = false },
+        onGenerated = { generated ->
+            media.pause()
+            media.clear()
+            aiSourceText = generated
+            sourceName = null
+            webSourceUrl = null
+            mediaUrl = ""
+            resetSegments()
+        }
+    )
 }

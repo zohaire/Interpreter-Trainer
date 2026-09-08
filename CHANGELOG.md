@@ -1,10 +1,12 @@
-# Classic AI rollback
-
-- Restore the 0.5.5 coach HTML and native streaming/chat/voice implementation from `5a55ee3bc5`.
-- Keep current package signing/versioning, privacy disclosure, practice navigation, saved data and non-looping Standard Arabic policy.
-- Replace checks that required the removed active Qwen3.8/AI6 layers with browser checks of the actual restored implementation. Live provider access remains unverified.
-
 # Changelog
+
+## Inline AI practice generation — 2026-09-08
+
+- Added a compact generator sheet to Simultaneous, Shadowing, Consecutive and Live Transcription, inserting clean passages without leaving the exercise.
+- Added mode-aware, language-aware and length-aware passage constraints with Modern Standard Arabic enforcement and whitespace normalization.
+- Redesigned Interpreter AI as a polished single-chat workspace and removed the separate evaluation UI and request path.
+- Added Zouhair Elachaqi's verified UM5 academic and research profile to the assistant's authoritative developer context without inferring unverified credentials.
+- Expanded browser and unit regression coverage for the generator, single-pane coach and developer identity.
 
 ## Professional practice dashboard — 2026-09-08
 

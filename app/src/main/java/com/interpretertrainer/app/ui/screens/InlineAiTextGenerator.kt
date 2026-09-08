@@ -106,8 +106,8 @@ fun InlineAiTextGenerator(
 
     val bridge = remember {
         InlineAiNativeBridge(
-            onReady = { ready = true },
-            onGenerated = { raw ->
+            readyCallback = { ready = true },
+            generatedCallback = { raw ->
                 val clean = normalizeGeneratedPracticeText(raw)
                 generating = false
                 if (clean.isBlank()) {
@@ -117,7 +117,7 @@ fun InlineAiTextGenerator(
                     latestDismiss()
                 }
             },
-            onError = { message ->
+            errorCallback = { message ->
                 generating = false
                 error = message.ifBlank { "Could not generate a passage. Please try again." }
             }
@@ -241,20 +241,23 @@ fun InlineAiTextGenerator(
 }
 
 private class InlineAiNativeBridge(
-    private val onReady: () -> Unit,
-    private val onGenerated: (String) -> Unit,
-    private val onError: (String) -> Unit
+    private val readyCallback: () -> Unit,
+    private val generatedCallback: (String) -> Unit,
+    private val errorCallback: (String) -> Unit
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @JavascriptInterface
-    fun onReady(@Suppress("UNUSED_PARAMETER") value: String) = mainHandler.post { onReady() }
+    fun onReady(@Suppress("UNUSED_PARAMETER") value: String): Boolean =
+        mainHandler.post { readyCallback() }
 
     @JavascriptInterface
-    fun onGenerated(value: String) = mainHandler.post { onGenerated(value) }
+    fun onGenerated(value: String): Boolean =
+        mainHandler.post { generatedCallback(value) }
 
     @JavascriptInterface
-    fun onError(value: String) = mainHandler.post { onError(value) }
+    fun onError(value: String): Boolean =
+        mainHandler.post { errorCallback(value) }
 }
 
 @SuppressLint("SetJavaScriptEnabled")

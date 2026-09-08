@@ -765,14 +765,14 @@ private fun HeroWaves() {
 
 private fun routeForPracticeMode(mode: String?): String = when (mode) {
     PracticeMode.SHADOWING.name -> Routes.SHADOWING
-    PracticeMode.CONSECUTIVE_INTERPRETATION.name -> Routes.CONSECUTIVE
+    PracticeMode.CONSECUTIVE.name -> Routes.CONSECUTIVE
     PracticeMode.LIVE_TRANSCRIPTION.name -> Routes.TRANSCRIPTION
     else -> Routes.SIMULTANEOUS
 }
 
 private fun practiceModeTitle(mode: String?): String = when (mode) {
     PracticeMode.SHADOWING.name -> "Shadowing"
-    PracticeMode.CONSECUTIVE_INTERPRETATION.name -> "Consecutive interpretation"
+    PracticeMode.CONSECUTIVE.name -> "Consecutive interpretation"
     PracticeMode.LIVE_TRANSCRIPTION.name -> "Live transcription"
     else -> "Simultaneous interpretation"
 }

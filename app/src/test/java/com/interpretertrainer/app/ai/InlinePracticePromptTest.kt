@@ -18,7 +18,7 @@ class InlinePracticePromptTest {
             )
         )
 
-        assertTrue(prompt.contains("consecutive interpretation"))
+        assertTrue(prompt.contains("Consecutive interpretation"))
         assertTrue(prompt.contains("Write in French"))
         assertTrue(prompt.contains("interpret it into Arabic (MSA)"))
         assertTrue(prompt.contains("renewable energy policy"))

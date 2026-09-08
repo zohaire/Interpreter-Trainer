@@ -6,6 +6,13 @@
 
 # Changelog
 
+## Professional practice dashboard — 2026-09-08
+
+- Rebuilt the home experience from the approved blue studio mockup with a responsive hero, weekly goal ring, resume card and focused 2×2 practice grid.
+- Connected weekly progress and resume actions to completed sessions stored on-device instead of displaying placeholder metrics.
+- Added persistent Home, Practice, AI Coach and History navigation, plus accessible progress semantics and complete light/dark presentation.
+- Refined the shared Material theme and top app bars around the professional navy, blue and cyan visual system while preserving the existing coach and practice runtimes.
+
 ## Deterministic Interpreter AI opening — 2026-08-31
 
 - Removed the native readiness gate that could cover a successfully bundled coach on some Android WebView implementations.

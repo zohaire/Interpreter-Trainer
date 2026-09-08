@@ -62,7 +62,8 @@ fun InterpreterTrainerApp(
             HomeScreen(
                 onNavigate = navigate,
                 themeMode = themeMode,
-                onThemeModeChange = onThemeModeChange
+                onThemeModeChange = onThemeModeChange,
+                sessionViewModel = sessionViewModel
             )
         }
         composable(Routes.SIMULTANEOUS) {

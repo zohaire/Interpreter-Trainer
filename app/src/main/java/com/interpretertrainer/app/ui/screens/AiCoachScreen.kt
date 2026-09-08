@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.interpretertrainer.app.ai.AiPracticeBridge
+import com.interpretertrainer.app.ai.InterpreterDeveloperProfile
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.speech.MicrophoneSessionCoordinator
 import com.interpretertrainer.app.speech.NaturalAndroidVoice
@@ -113,7 +114,7 @@ private fun AiPrivacyDisclosure(onBack: () -> Unit, onAccept: () -> Unit) {
                 style = MaterialTheme.typography.headlineSmall
             )
             Text(
-                "To provide chat and evaluation, the app sends your messages, submitted evaluation material and up to five recent practice summaries—including saved notes or feedback—to Puter and the selected Qwen model.",
+                "To provide chat and in-exercise text generation, the app sends your messages or generation choices and up to five recent practice summaries—including saved notes or feedback—to Puter and the selected Qwen model.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
@@ -564,11 +565,6 @@ private fun coachEnhancementScript(): String = """
     try { native?.stopSpeaking?.(); } catch (_) {}
   };
 
-  const mode = document.getElementById('mode');
-  if (mode) {
-    mode.innerHTML = '<option>Simultaneous Interpretation</option><option>Shadowing</option><option>Consecutive Interpretation</option><option>Live Transcription</option>';
-  }
-
   const targets = [
     ['SIMULTANEOUS', 'Use in Simultaneous'],
     ['SHADOWING', 'Use in Shadowing'],
@@ -1002,7 +998,7 @@ private fun coachEnhancementScript(): String = """
 """.trimIndent()
 
 @SuppressLint("SetJavaScriptEnabled")
-private fun configureCoachWebView(webView: WebView) {
+internal fun configureCoachWebView(webView: WebView) {
     webView.settings.apply {
         javaScriptEnabled = true
         domStorageEnabled = true
@@ -1017,7 +1013,7 @@ private fun configureCoachWebView(webView: WebView) {
     }
 }
 
-private class CoachChromeClient(private val context: Context) : WebChromeClient() {
+internal class CoachChromeClient(private val context: Context) : WebChromeClient() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreateWindow(
         view: WebView?,
@@ -1098,10 +1094,7 @@ private fun isClassicCoachOrigin(uri: Uri?): Boolean =
         uri?.host.equals("interpreter-trainer.app", ignoreCase = true)
 
 private fun buildPracticeContext(sessions: List<PracticeSessionEntity>): String = buildString {
-    appendLine("AUTHORITATIVE APP IDENTITY:")
-    appendLine("Interpreter Trainer was created and developed by Zouhair Elachaqi.")
-    appendLine("Zouhair Elachaqi is the creator of this app, not the AI model or Puter service.")
-    appendLine("If the user asks who created, developed, designed, owns, or made the app, answer with Zouhair Elachaqi and do not claim that the creator is unknown.")
+    appendLine(InterpreterDeveloperProfile.aiContext)
     appendLine()
 
     if (sessions.isEmpty()) {

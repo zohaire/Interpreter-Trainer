@@ -1,6 +1,6 @@
 # Privacy Policy — Interpreter Trainer
 
-Last updated: 4 September 2026
+Last updated: 8 September 2026
 
 Interpreter Trainer is developed by Zouhair Elachaqi. This policy describes how the Android application handles information.
 
@@ -19,7 +19,7 @@ Interpreter AI is optional and requires an internet connection. Before it is ena
 When a user opens and uses Interpreter AI, the following information may be sent to Puter and the selected hosted Qwen model to answer the request:
 
 - messages entered in the coach;
-- source and trainee material submitted for an evaluation; and
+- the selected practice mode, languages, topic and length used for in-exercise text generation;
 - up to five recent practice summaries, which may contain language pairs, durations, notes and previously saved feedback;
 - AI reply text submitted for neural speech generation when voice output is used.
 

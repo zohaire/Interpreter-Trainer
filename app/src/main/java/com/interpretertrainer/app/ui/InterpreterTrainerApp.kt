@@ -69,29 +69,25 @@ fun InterpreterTrainerApp(
         composable(Routes.SIMULTANEOUS) {
             SimultaneousScreen(
                 onBack = navController::popBackStack,
-                sessionViewModel = sessionViewModel,
-                onOpenAiCoach = { navigate(Routes.AI_COACH) }
+                sessionViewModel = sessionViewModel
             )
         }
         composable(Routes.SHADOWING) {
             ShadowingScreen(
                 onBack = navController::popBackStack,
-                sessionViewModel = sessionViewModel,
-                onOpenAiCoach = { navigate(Routes.AI_COACH) }
+                sessionViewModel = sessionViewModel
             )
         }
         composable(Routes.CONSECUTIVE) {
             ConsecutiveScreen(
                 onBack = navController::popBackStack,
-                sessionViewModel = sessionViewModel,
-                onOpenAiCoach = { navigate(Routes.AI_COACH) }
+                sessionViewModel = sessionViewModel
             )
         }
         composable(Routes.TRANSCRIPTION) {
             LiveTranscriptionScreen(
                 onBack = navController::popBackStack,
-                sessionViewModel = sessionViewModel,
-                onOpenAiCoach = { navigate(Routes.AI_COACH) }
+                sessionViewModel = sessionViewModel
             )
         }
         composable(Routes.AI_COACH) {

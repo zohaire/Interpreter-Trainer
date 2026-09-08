@@ -1,4 +1,4 @@
-name: Classic Interpreter AI integration
+name: Interpreter AI integration
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Check restored model in the live provider catalog
+      - name: Check AI model in the live provider catalog
         shell: bash
         run: |
           set -euo pipefail
@@ -31,11 +31,12 @@ jobs:
           npm init -y >/dev/null
           npm install --silent playwright@1.55.0
           npx playwright install --with-deps chromium
-      - name: Verify restored runtime and Arabic observer
+      - name: Verify coach, inline generator and Arabic observer
         env:
           NODE_PATH: /tmp/puter-ci/node_modules
         run: |
           node .github/tests/interpreter-arabic-observer.cjs
           node .github/tests/interpreter-classic-runtime.cjs
+          node .github/tests/interpreter-inline-generator.cjs
       - name: Explain validation boundary
         run: echo 'The catalog check is live. Browser tests simulate the SDK and do not prove a signed-in user can receive a live answer.' >> "$GITHUB_STEP_SUMMARY"

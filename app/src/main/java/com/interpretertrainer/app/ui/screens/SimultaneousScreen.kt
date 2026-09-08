@@ -25,6 +25,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.media3.ui.PlayerView
 import com.interpretertrainer.app.ai.AiPracticeBridge
+import com.interpretertrainer.app.ai.PracticeGenerationMode
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.media.MediaController
 import com.interpretertrainer.app.media.MediaLinkResolver
@@ -39,8 +40,7 @@ import java.io.File
 @Composable
 fun SimultaneousScreen(
     onBack: () -> Unit,
-    sessionViewModel: SessionViewModel,
-    onOpenAiCoach: () -> Unit
+    sessionViewModel: SessionViewModel
 ) {
     val context = LocalContext.current
     val sourceMedia = remember { MediaController(context) }
@@ -62,6 +62,7 @@ fun SimultaneousScreen(
     var recordingStartedAt by rememberSaveable { mutableLongStateOf(0L) }
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var isRecording by remember { mutableStateOf(false) }
+    var showAiGenerator by rememberSaveable { mutableStateOf(false) }
 
     val hasWebSource = !webSourceUrl.isNullOrBlank()
     val hasSource = hasNativeMedia || hasWebSource || sourceText.isNotBlank()
@@ -238,9 +239,9 @@ fun SimultaneousScreen(
                         modifier = Modifier.weight(1f)
                     )
                     ModernActionButton(
-                        text = "AI",
+                        text = "Generate",
                         icon = Icons.Default.AutoAwesome,
-                        onClick = onOpenAiCoach,
+                        onClick = { showAiGenerator = true },
                         enabled = !isRecording,
                         modifier = Modifier.weight(1f)
                     )
@@ -382,4 +383,22 @@ fun SimultaneousScreen(
             Spacer(Modifier.height(8.dp))
         }
     }
+
+    InlineAiTextGenerator(
+        visible = showAiGenerator,
+        mode = PracticeGenerationMode.SIMULTANEOUS,
+        sourceLanguage = sourceLang,
+        targetLanguage = targetLang,
+        onDismiss = { showAiGenerator = false },
+        onGenerated = { generated ->
+            sourceMedia.pause()
+            sourceMedia.clear()
+            sourceText = generated
+            sourceName = "AI-generated simultaneous passage"
+            hasNativeMedia = false
+            webSourceUrl = null
+            mediaUrl = ""
+            resetPracticeForNewSource()
+        }
+    )
 }

@@ -26,6 +26,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.media3.ui.PlayerView
 import com.interpretertrainer.app.ai.AiPracticeBridge
+import com.interpretertrainer.app.ai.PracticeGenerationMode
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.media.MediaController
 import com.interpretertrainer.app.media.MediaLinkResolver
@@ -40,8 +41,7 @@ import java.io.File
 @Composable
 fun ShadowingScreen(
     onBack: () -> Unit,
-    sessionViewModel: SessionViewModel,
-    onOpenAiCoach: () -> Unit
+    sessionViewModel: SessionViewModel
 ) {
     val context = LocalContext.current
     val sourceMedia = remember { MediaController(context) }
@@ -62,6 +62,7 @@ fun ShadowingScreen(
     var recordingElapsed by rememberSaveable { mutableLongStateOf(0L) }
     var isRecording by remember { mutableStateOf(false) }
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var showAiGenerator by rememberSaveable { mutableStateOf(false) }
 
     var ttsReady by remember { mutableStateOf(false) }
     val tts = remember {
@@ -253,9 +254,9 @@ fun ShadowingScreen(
                         modifier = Modifier.weight(1f)
                     )
                     ModernActionButton(
-                        text = "AI",
+                        text = "Generate",
                         icon = Icons.Default.AutoAwesome,
-                        onClick = onOpenAiCoach,
+                        onClick = { showAiGenerator = true },
                         enabled = !isRecording,
                         modifier = Modifier.weight(1f)
                     )
@@ -281,7 +282,7 @@ fun ShadowingScreen(
                         }
                     },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
-                    placeholder = { Text("Paste text or send a passage from Interpreter AI") },
+                    placeholder = { Text("Generate a passage here or paste one") },
                     enabled = !isRecording,
                     shape = RoundedCornerShape(18.dp)
                 )
@@ -405,4 +406,23 @@ fun ShadowingScreen(
             Spacer(Modifier.height(8.dp))
         }
     }
+
+    InlineAiTextGenerator(
+        visible = showAiGenerator,
+        mode = PracticeGenerationMode.SHADOWING,
+        sourceLanguage = language,
+        targetLanguage = language,
+        onDismiss = { showAiGenerator = false },
+        onGenerated = { generated ->
+            stopSource()
+            sourceMedia.clear()
+            sourceText = generated
+            sourceName = "AI-generated shadowing passage"
+            hasNativeMedia = false
+            webSourceUrl = null
+            mediaUrl = ""
+            transcript = ""
+            errorMessage = null
+        }
+    )
 }

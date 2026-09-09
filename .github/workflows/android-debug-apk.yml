@@ -53,7 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           grep -q 'qwen/qwen3.6-27b' app/src/main/assets/interpreter_coach.html
-          grep -q 'qwen/qwen3.6-27b' app/src/main/assets/interpreter_inline_generator.html
+          grep -q 'gemini-3.1-flash-lite' app/src/main/assets/interpreter_inline_generator.html
           grep -q 'qwen/qwen3.6-27b' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'AiPrivacyPreferences.hasAccepted' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'MicrophoneSessionCoordinator' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt

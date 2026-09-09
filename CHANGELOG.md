@@ -1,5 +1,10 @@
 # Changelog
 
+## Faster inline AI generation — 2026-09-09
+
+- Moved the in-exercise passage generator to a low-latency Flash Lite model while retaining Qwen as an availability fallback.
+- Reduced excessive output-token budgets, blocked duplicate generation calls, and added a 30-second request deadline.
+
 ## Inline AI practice generation — 2026-09-08
 
 - Added a compact generator sheet to Simultaneous, Shadowing, Consecutive and Live Transcription, inserting clean passages without leaving the exercise.

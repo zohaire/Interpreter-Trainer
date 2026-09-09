@@ -51,7 +51,7 @@ const watchdog = setTimeout(() => {
 
     const state = await page.evaluate(() => ({ requests: window.__requests, generated: window.__generated, failures: window.__generatorErrors }));
     assert.equal(state.requests.length, 1);
-    assert.equal(state.requests[0].options.model, 'qwen/qwen3.6-27b');
+    assert.equal(state.requests[0].options.model, 'gemini-3.1-flash-lite');
     assert.equal(state.requests[0].options.stream, true);
     assert.equal(state.requests[0].options.max_tokens, 600);
     assert.match(state.requests[0].messages[1].content, /consecutive interpretation/);
@@ -61,10 +61,14 @@ const watchdog = setTimeout(() => {
     assert.deepEqual(state.failures, []);
 
     await page.evaluate(() => { window.__failNext = true; window.generatePracticeText('Try another passage.', 360); });
-    await page.waitForFunction(() => window.__generatorErrors.length === 1);
-    assert.match((await page.evaluate(() => window.__generatorErrors[0])), /Generator quota exhausted/);
+    await page.waitForFunction(() => window.__generated.length === 2);
+    const fallbackState = await page.evaluate(() => ({ requests: window.__requests, failures: window.__generatorErrors }));
+    assert.equal(fallbackState.requests.length, 3);
+    assert.equal(fallbackState.requests[1].options.model, 'gemini-3.1-flash-lite');
+    assert.equal(fallbackState.requests[2].options.model, 'qwen/qwen3.6-27b');
+    assert.deepEqual(fallbackState.failures, []);
     assert.deepEqual(errors, []);
-    console.log('Inline AI generator: auth, constrained streaming request, native delivery and visible provider failure passed (simulated SDK).');
+    console.log('Inline AI generator: auth, fast constrained streaming, fallback and native delivery passed (simulated SDK).');
   } finally {
     await browser.close();
   }

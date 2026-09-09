@@ -23,9 +23,9 @@ enum class PracticeGenerationMode(
 }
 
 enum class PracticeTextLength(val label: String, val targetWords: Int, val maxTokens: Int) {
-    SHORT("Short", 120, 360),
-    STANDARD("Standard", 220, 600),
-    EXTENDED("Extended", 350, 900)
+    SHORT("Short", 120, 240),
+    STANDARD("Standard", 220, 420),
+    EXTENDED("Extended", 350, 640)
 }
 
 data class InlinePracticeRequest(

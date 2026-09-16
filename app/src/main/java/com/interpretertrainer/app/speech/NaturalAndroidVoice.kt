@@ -47,8 +47,8 @@ object NaturalAndroidVoice {
         val candidates = if (liveConversation) {
             matchingVoices.sortedWith(
                 compareBy<Voice> { it.isNetworkConnectionRequired }
-                    .thenBy { it.latency }
                     .thenByDescending { it.quality }
+                    .thenBy { it.latency }
                     .thenByDescending { it.locale.country.equals(locale.country, ignoreCase = true) }
             )
         } else {
@@ -63,7 +63,9 @@ object NaturalAndroidVoice {
             runCatching { tts.voice = best }
         }
 
-        val requestedRate = if (liveConversation) 1.08f else speechRate
+        // A small speed lift keeps turn-taking responsive without the rushed, synthetic sound
+        // produced by the previous 1.08x live-call rate.
+        val requestedRate = if (liveConversation) 1.04f else speechRate
         tts.setSpeechRate(requestedRate.coerceIn(0.72f, 1.18f))
         tts.setPitch(
             when (locale.language.lowercase(Locale.ROOT)) {

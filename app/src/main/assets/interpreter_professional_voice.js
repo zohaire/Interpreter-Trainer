@@ -1,5 +1,5 @@
 (() => {
-  if (window.__professionalInterpreterVoiceV1) return 'ready';
+  if (window.__professionalInterpreterVoiceV2) return 'ready';
   if (!window.InterpreterNative) return 'pending';
 
   const STORAGE_KEY = 'interpreterProfessionalVoiceV1';
@@ -8,12 +8,12 @@
   const profiles = {
     studio: {
       label: 'Studio',
-      voice: 'coral',
-      direction: 'Sound like a polished present-day conference interpreter coach: natural, composed, warm and precise. Use crisp diction and a conversational medium pace. Avoid theatrical, synthetic or old-fashioned announcer delivery.'
+      voice: 'marin',
+      direction: 'Sound like a polished present-day conference interpreter coach: natural, composed, warm and precise. Use crisp diction, varied but subtle intonation, and a conversational pace. Avoid theatrical, synthetic or old-fashioned announcer delivery.'
     },
     warm: {
       label: 'Warm',
-      voice: 'ballad',
+      voice: 'cedar',
       direction: 'Sound warm, attentive and human while remaining professional. Use natural phrasing, subtle expression and an unhurried conversational pace. Never sound theatrical or like an automated announcement.'
     },
     broadcast: {
@@ -46,6 +46,7 @@
   let selectedProfile = readProfile();
   let activeAudio = null;
   let requestGeneration = 0;
+  const FIRST_AUDIO_DEADLINE_MS = 1800;
 
   const finish = () => {
     try { window.__nativeSpeechFinished?.(); } catch (_) {}
@@ -80,14 +81,23 @@
     const profile = profiles[selectedProfile] || profiles.studio;
 
     (async () => {
+      let deadline = 0;
       try {
-        const audio = await window.puter.ai.txt2speech(clean, {
+        const request = window.puter.ai.txt2speech(clean, {
           provider: 'openai',
           model: 'gpt-4o-mini-tts',
           voice: profile.voice,
-          response_format: 'mp3',
+          // WAV avoids MP3 decoding overhead and is the recommended low-latency format.
+          response_format: 'wav',
           instructions: `${profile.direction} ${languageDirection(languageTag)}`
         });
+        const audio = await Promise.race([
+          request,
+          new Promise((_, reject) => {
+            deadline = setTimeout(() => reject(new Error('Neural voice startup timed out.')), FIRST_AUDIO_DEADLINE_MS);
+          })
+        ]);
+        if (deadline) clearTimeout(deadline);
         if (generation !== requestGeneration) return;
 
         activeAudio = audio;
@@ -106,7 +116,11 @@
         };
         await audio.play();
       } catch (_) {
+        if (deadline) clearTimeout(deadline);
         if (generation !== requestGeneration) return;
+        // Never leave the user waiting on a slow neural request. Android TTS is already warm and
+        // can begin locally while the next turn remains fully interruptible.
+        requestGeneration += 1;
         activeAudio = null;
         fallbackSpeak(clean, languageTag);
       }
@@ -175,5 +189,6 @@
   installSelector();
 
   window.__professionalInterpreterVoiceV1 = true;
+  window.__professionalInterpreterVoiceV2 = true;
   return 'ready';
 })();

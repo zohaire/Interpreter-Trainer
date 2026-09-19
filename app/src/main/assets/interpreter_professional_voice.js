@@ -1,25 +1,25 @@
 (() => {
-  if (window.__professionalInterpreterVoiceV1) return 'ready';
+  if (window.__professionalInterpreterVoiceV2) return 'ready';
   if (!window.InterpreterNative) return 'pending';
 
-  const STORAGE_KEY = 'interpreterProfessionalVoiceV1';
+  const STORAGE_KEY = 'interpreterProfessionalVoiceV2';
   const native = window.InterpreterNative;
   const live = window.InterpreterLiveNative || null;
   const profiles = {
-    studio: {
-      label: 'Studio',
-      voice: 'coral',
-      direction: 'Sound like a polished present-day conference interpreter coach: natural, composed, warm and precise. Use crisp diction and a conversational medium pace. Avoid theatrical, synthetic or old-fashioned announcer delivery.'
+    natural: {
+      label: 'Natural',
+      voice: 'nova',
+      direction: 'Speak like a present-day human interpretation coach in a relaxed one-to-one conversation. Use fluid phrasing, subtle expression, crisp diction and a medium pace. Avoid robotic timing, theatrical emphasis and announcer delivery.'
     },
     warm: {
       label: 'Warm',
-      voice: 'ballad',
-      direction: 'Sound warm, attentive and human while remaining professional. Use natural phrasing, subtle expression and an unhurried conversational pace. Never sound theatrical or like an automated announcement.'
+      voice: 'sage',
+      direction: 'Sound warm, attentive and genuinely conversational while remaining professional. Use natural pauses, gentle expression and an unhurried pace. Never sound like an automated announcement.'
     },
-    broadcast: {
-      label: 'Broadcast',
+    grounded: {
+      label: 'Grounded',
       voice: 'onyx',
-      direction: 'Sound like a contemporary international news and conference professional: confident, clear and neutral. Keep the delivery lively but controlled, without a vintage radio cadence.'
+      direction: 'Use a grounded, confident and clear professional voice. Keep it contemporary and conversational, with controlled energy and no vintage radio cadence.'
     }
   };
 
@@ -36,10 +36,10 @@
 
   const readProfile = () => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY) || 'studio';
-      return profiles[stored] ? stored : 'studio';
+      const stored = localStorage.getItem(STORAGE_KEY) || 'natural';
+      return profiles[stored] ? stored : 'natural';
     } catch (_) {
-      return 'studio';
+      return 'natural';
     }
   };
 
@@ -77,7 +77,7 @@
 
     stopAudio();
     const generation = requestGeneration;
-    const profile = profiles[selectedProfile] || profiles.studio;
+    const profile = profiles[selectedProfile] || profiles.natural;
 
     (async () => {
       try {
@@ -153,7 +153,7 @@
         .join('');
       selector.value = selectedProfile;
       selector.onchange = event => {
-        selectedProfile = profiles[event.target.value] ? event.target.value : 'studio';
+        selectedProfile = profiles[event.target.value] ? event.target.value : 'natural';
         try { localStorage.setItem(STORAGE_KEY, selectedProfile); } catch (_) {}
       };
       controls.appendChild(selector);
@@ -174,6 +174,6 @@
   }, 150);
   installSelector();
 
-  window.__professionalInterpreterVoiceV1 = true;
+  window.__professionalInterpreterVoiceV2 = true;
   return 'ready';
 })();

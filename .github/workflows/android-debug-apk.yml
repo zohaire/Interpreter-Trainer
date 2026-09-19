@@ -58,6 +58,7 @@ jobs:
           grep -q 'qwen/qwen3.6-27b' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'AiPrivacyPreferences.hasAccepted' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'MicrophoneSessionCoordinator' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
+          grep -q 'evaluateJavascript(professionalVoice, null)' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           grep -q 'interpreter_standard_arabic.js' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt
           if grep -qE 'interpreter_ai_provider.js|interpreter_ai_bootstrap.js|interpreter_professional_ai.js|NativeAiNetworkBridge' app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt; then
             echo 'The online AI screens must not load the incompatible request layers.'

@@ -4,6 +4,7 @@
 
 - Moved the compact in-exercise passage generator to the low-latency GPT-5 Nano route while retaining Qwen3.6 27B for the full coaching workspace.
 - Disabled reasoning for the constrained passage-writing request and requested low verbosity to reduce time to first token and total generation time.
+- Removed the custom temperature sent to GPT-5 Nano because that model accepts only its default temperature.
 - Added a browser regression check that rejects duplicate rapid generation calls while a passage is already in flight.
 
 ## Inline AI practice generation — 2026-09-08

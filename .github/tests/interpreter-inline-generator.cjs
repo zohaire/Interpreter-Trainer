@@ -56,6 +56,7 @@ const watchdog = setTimeout(() => {
     assert.equal(state.requests[0].options.max_tokens, 600);
     assert.equal(state.requests[0].options.reasoning_effort, 'none');
     assert.equal(state.requests[0].options.verbosity, 'low');
+    assert.equal('temperature' in state.requests[0].options, false, 'GPT-5 Nano must use its default temperature');
     assert.match(state.requests[0].messages[1].content, /consecutive interpretation/);
     assert.match(state.requests[0].messages[1].content, /French/);
     assert.match(state.requests[0].messages[1].content, /Arabic \(MSA\)/);

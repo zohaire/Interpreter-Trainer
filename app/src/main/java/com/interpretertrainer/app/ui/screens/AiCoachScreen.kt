@@ -503,6 +503,12 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
     val arabicPolicy = context.assets.open("interpreter_standard_arabic.js")
         .bufferedReader(Charsets.UTF_8).use { it.readText() }
 
+    // This script owns the selectable neural voice profiles. It must be injected
+    // after the enhancement creates the call UI; bundling it as an asset alone
+    // does not activate the voices.
+    val professionalVoice = context.assets.open("interpreter_professional_voice.js")
+        .bufferedReader(Charsets.UTF_8).use { it.readText() }
+
     val webView = WebView(context)
     webView.layoutParams = ViewGroup.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -526,6 +532,7 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
             super.onPageFinished(view, url)
             if (!isClassicCoachOrigin(url?.let(Uri::parse))) return
             view?.evaluateJavascript(coachEnhancementScript(), null)
+            view?.evaluateJavascript(professionalVoice, null)
             view?.evaluateJavascript(arabicPolicy, null)
         }
     }
@@ -554,6 +561,9 @@ private fun coachEnhancementScript(): String = """
   const native = window.InterpreterNative;
   const speakVoice = (text, lang) => {
     try {
+      if (typeof window.__professionalVoiceSpeak === 'function') {
+        return window.__professionalVoiceSpeak(text, lang) === true;
+      }
       if (typeof window.playNaturalInterpreterVoice === 'function') {
         return window.playNaturalInterpreterVoice(text, lang) === true;
       }
@@ -588,6 +598,7 @@ private fun coachEnhancementScript(): String = """
       border-radius:999px; padding:8px 12px; background:var(--accent-soft); color:var(--accent-ink);
       font-size:12px; font-weight:750; cursor:pointer;
     }
+    .voice-call-launch svg { width:17px; height:17px; }
     .voice-call-launch:active { transform:scale(.98); }
     .voice-call-overlay {
       position:fixed; inset:0; z-index:9999; display:none; flex-direction:column; align-items:center;
@@ -600,10 +611,11 @@ private fun coachEnhancementScript(): String = """
     .voice-call-badge { font-size:11px; color:var(--muted); }
     .voice-orb-wrap { flex:1; width:100%; display:flex; flex-direction:column; justify-content:center; align-items:center; min-height:0; }
     .voice-orb {
-      width:154px; height:154px; border-radius:50%; display:grid; place-items:center; font-size:32px; font-weight:850;
+      width:154px; height:154px; border-radius:50%; display:grid; place-items:center;
       color:white; background:linear-gradient(145deg,var(--accent),color-mix(in srgb,var(--accent) 52%,#8d6cff));
       box-shadow:0 24px 70px color-mix(in srgb,var(--accent) 30%,transparent); transition:transform .22s ease,box-shadow .22s ease;
     }
+    .voice-orb svg { width:58px; height:58px; }
     @media (prefers-color-scheme: dark) { .voice-orb { color:#101116; } }
     .voice-orb.listening { transform:scale(1.07); box-shadow:0 0 0 12px color-mix(in srgb,var(--accent) 8%,transparent),0 26px 80px color-mix(in srgb,var(--accent) 34%,transparent); animation:voicePulse 1.25s infinite ease-in-out; }
     .voice-orb.speaking { transform:scale(1.04); animation:voiceSpeak 1.05s infinite ease-in-out; }
@@ -614,6 +626,7 @@ private fun coachEnhancementScript(): String = """
       width:58px; height:58px; border-radius:50%; border:1px solid var(--border); background:var(--surface-soft); color:var(--text);
       display:grid; place-items:center; font-size:21px; cursor:pointer;
     }
+    .voice-round-control svg { width:24px; height:24px; }
     .voice-round-control.end { width:68px; height:68px; border:0; background:#d93025; color:white; transform:rotate(135deg); }
     .voice-round-control.muted { background:var(--surface-strong); color:var(--muted); }
     @keyframes voicePulse { 0%,100%{transform:scale(1.04)} 50%{transform:scale(1.10)} }
@@ -624,6 +637,13 @@ private fun coachEnhancementScript(): String = """
   const composer = document.querySelector('.composer');
   const composerShell = document.querySelector('.composer-shell');
   const sendButton = document.getElementById('sendBtn');
+  const voiceIcons = {
+    call: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h2l2-5 4 10 3-7 2 2h3"/></svg>',
+    microphone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4M9 21h6"/></svg>',
+    muted: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 4 16 16M9 9v2a3 3 0 0 0 5 2.2M15 9V6a3 3 0 0 0-5.1-2.1M17 16.9A7 7 0 0 0 19 12M5 12a7 7 0 0 0 10.7 5.9M12 19v3"/></svg>',
+    end: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 15.5c4.8-4.7 10.2-4.7 15 0"/><path d="m7 13 1.2 4-2.7 1.4-2-3.1ZM17 13l-1.2 4 2.7 1.4 2-3.1Z"/></svg>',
+    waveform: '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" aria-hidden="true"><path d="M10 35v-6M18 43V21M26 50V14M34 45V19M42 40V24M50 36v-8M58 34v-4"/></svg>'
+  };
 
   let language = document.getElementById('voiceLang');
   if (composer && sendButton && !language) {
@@ -661,7 +681,7 @@ private fun coachEnhancementScript(): String = """
     call.id = 'voiceCallLaunch';
     call.type = 'button';
     call.className = 'voice-call-launch';
-    call.innerHTML = '<span>☎</span><span>Voice call</span>';
+    call.innerHTML = voiceIcons.call + '<span>Voice call</span>';
     call.onclick = () => window.startVoiceCall?.();
     strip.appendChild(call);
     composerShell.insertBefore(strip, composerShell.firstChild);
@@ -678,13 +698,13 @@ private fun coachEnhancementScript(): String = """
       </select>
     </div>
     <div class="voice-orb-wrap">
-      <div id="voiceOrb" class="voice-orb">AI</div>
+      <div id="voiceOrb" class="voice-orb">${'$'}{voiceIcons.waveform}</div>
       <div id="voiceCallStatus" class="voice-call-status">Ready</div>
       <div id="voiceCallLive" class="voice-call-live">Start speaking naturally. Interpreter AI will answer aloud and keep the conversation going.</div>
     </div>
     <div class="voice-call-controls">
-      <button id="voiceMute" class="voice-round-control" type="button" aria-label="Mute microphone">🎙</button>
-      <button id="voiceEnd" class="voice-round-control end" type="button" aria-label="End voice call">☎</button>
+      <button id="voiceMute" class="voice-round-control" type="button" aria-label="Mute microphone">${'$'}{voiceIcons.microphone}</button>
+      <button id="voiceEnd" class="voice-round-control end" type="button" aria-label="End voice call">${'$'}{voiceIcons.end}</button>
     </div>
   `;
   document.body.appendChild(overlay);
@@ -763,7 +783,7 @@ private fun coachEnhancementScript(): String = """
   document.getElementById('voiceMute').onclick = event => {
     window.__voiceCallMuted = !window.__voiceCallMuted;
     event.currentTarget.classList.toggle('muted', window.__voiceCallMuted);
-    event.currentTarget.textContent = window.__voiceCallMuted ? '🔇' : '🎙';
+    event.currentTarget.innerHTML = window.__voiceCallMuted ? voiceIcons.muted : voiceIcons.microphone;
     if (window.__voiceCallMuted) {
       native?.stopVoiceInput?.();
       callStatus('Muted', 'Tap the microphone button to continue.');

@@ -12,11 +12,14 @@ const watchdog = setTimeout(() => {
 
 (async () => {
   const html = fs.readFileSync('app/src/main/assets/interpreter_coach.html', 'utf8');
+  const professionalVoice = fs.readFileSync('app/src/main/assets/interpreter_professional_voice.js', 'utf8');
   const kotlin = fs.readFileSync('app/src/main/java/com/interpretertrainer/app/ui/screens/AiCoachScreen.kt', 'utf8');
   const match = kotlin.match(/private fun coachEnhancementScript\(\): String = """\n([\s\S]*?)\n"""\.trimIndent\(\)/);
   assert.ok(match, 'Android must inject the coach enhancement script.');
   const enhancement = match[1].replaceAll("${'$'}", '$');
   new vm.Script(enhancement);
+  new vm.Script(professionalVoice);
+  assert.match(kotlin, /evaluateJavascript\(professionalVoice, null\)/, 'Android must activate the bundled neural voice profiles.');
   for (const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
     new vm.Script(script[1]);
   }
@@ -31,6 +34,7 @@ const watchdog = setTimeout(() => {
       window.__practice = [];
       window.__voiceStarts = 0;
       window.__voiceStops = 0;
+      window.__speechRequests = [];
       window.InterpreterNative = {
         getPracticeContext: () => 'Saved practice context.',
         sendToPractice(mode, text) { window.__practice.push({ mode, text }); return true; },
@@ -57,14 +61,28 @@ const watchdog = setTimeout(() => {
             if(options.stream) return Promise.resolve((async function*(){yield {text:text.slice(0,8)};yield {text:text.slice(8)};})());
             return Promise.resolve({message:{content:text}});
           },
-          txt2speech(){return Promise.reject(new Error('Use Android voice fallback'));}
+          txt2speech(text, options){
+            window.__speechRequests.push({text,options});
+            return Promise.resolve({
+              currentTime:0,
+              pause(){},
+              play(){ this.onplay?.(); this.onended?.(); return Promise.resolve(); }
+            });
+          }
         }
       };`
     }));
     await page.goto('https://interpreter-trainer.app/', { waitUntil: 'load' });
     await page.addScriptTag({ content: enhancement });
+    await page.addScriptTag({ content: professionalVoice });
     await page.addScriptTag({ path: 'app/src/main/assets/interpreter_standard_arabic.js' });
     await page.waitForFunction(() => Boolean(document.getElementById('voiceCallLaunch')));
+    await page.waitForFunction(() => Boolean(document.getElementById('voiceProfile')));
+    assert.deepEqual(await page.locator('#voiceProfile option').allTextContents(), ['Natural voice', 'Warm voice', 'Grounded voice']);
+    assert.equal(await page.locator('#voiceCallLaunch').innerText(), 'Voice call');
+    assert.equal(await page.locator('#voiceCallLaunch svg').count(), 1, 'Voice call launcher must use a vector icon.');
+    assert.equal(await page.locator('#voiceMute svg').count(), 1, 'Mute control must use a vector icon.');
+    assert.equal(await page.locator('#voiceEnd svg').count(), 1, 'End-call control must use a vector icon.');
     assert.equal(await page.locator('#evalTab').count(), 0, 'Evaluation tab must be removed.');
     assert.equal(await page.locator('#evaluatePane').count(), 0, 'Evaluation pane must be removed.');
 
@@ -84,6 +102,11 @@ const watchdog = setTimeout(() => {
 
     await page.locator('.message.assistant').last().getByRole('button', { name: 'Use in Shadowing', exact: true }).click();
     assert.equal((await page.evaluate(() => window.__practice))[0].mode, 'SHADOWING');
+    await page.locator('.message.assistant').last().getByRole('button', { name: 'Speak', exact: true }).click();
+    await page.waitForFunction(() => window.__speechRequests.length === 1);
+    const speech = await page.evaluate(() => window.__speechRequests[0]);
+    assert.equal(speech.options.model, 'gpt-4o-mini-tts');
+    assert.equal(speech.options.voice, 'nova');
 
     await page.evaluate(() => { window.__failNext = true; });
     await page.fill('#chatInput', 'Show provider failure.');

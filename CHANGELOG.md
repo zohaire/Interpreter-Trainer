@@ -4,6 +4,9 @@
 
 - Moved the compact in-exercise passage generator to the low-latency GPT-5 Nano route while retaining Qwen3.6 27B for the full coaching workspace.
 - Disabled reasoning for the constrained passage-writing request and requested low verbosity to reduce time to first token and total generation time.
+- Removed the custom temperature sent to GPT-5 Nano because that model accepts only its default temperature.
+- Activated the bundled neural chat voices, made Natural/Nova the default, and added selectable Warm/Sage and Grounded/Onyx profiles with Android TTS fallback.
+- Replaced the voice call's telephone and microphone emoji glyphs with consistent vector waveform, microphone, mute, and end-call icons.
 - Added a browser regression check that rejects duplicate rapid generation calls while a passage is already in flight.
 
 ## Inline AI practice generation — 2026-09-08

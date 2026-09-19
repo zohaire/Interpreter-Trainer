@@ -51,11 +51,11 @@ const watchdog = setTimeout(() => {
 
     const state = await page.evaluate(() => ({ requests: window.__requests, generated: window.__generated, failures: window.__generatorErrors }));
     assert.equal(state.requests.length, 1);
-    assert.equal(state.requests[0].options.model, 'gpt-5-nano');
+    assert.equal(state.requests[0].options.model, 'gpt-4.1-mini');
     assert.equal(state.requests[0].options.stream, true);
     assert.equal(state.requests[0].options.max_tokens, 600);
-    assert.equal(state.requests[0].options.reasoning_effort, 'none');
-    assert.equal(state.requests[0].options.verbosity, 'low');
+    assert.equal('reasoning_effort' in state.requests[0].options, false);
+    assert.equal('verbosity' in state.requests[0].options, false);
     assert.equal('temperature' in state.requests[0].options, false, 'GPT-5 Nano must use its default temperature');
     assert.match(state.requests[0].messages[1].content, /consecutive interpretation/);
     assert.match(state.requests[0].messages[1].content, /French/);

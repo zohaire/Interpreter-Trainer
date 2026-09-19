@@ -22,7 +22,7 @@ jobs:
           set -euo pipefail
           curl --location --fail --silent --show-error --max-time 45 \
             https://api.puter.com/puterai/chat/models/details --output /tmp/puter-models.json
-          node -e "const {models}=require('/tmp/puter-models.json'); for (const id of ['qwen/qwen3.6-27b','gpt-5-nano']) if(!models.some(m=>m.id===id||(m.aliases||[]).includes(id))) throw Error(id+' missing from live catalog');"
+          node -e "const {models}=require('/tmp/puter-models.json'); for (const id of ['qwen/qwen3.6-27b','gpt-4.1-mini']) if(!models.some(m=>m.id===id||(m.aliases||[]).includes(id))) throw Error(id+' missing from live catalog');"
       - name: Install browser test runtime
         working-directory: /tmp
         run: |
@@ -38,5 +38,6 @@ jobs:
           node .github/tests/interpreter-arabic-observer.cjs
           node .github/tests/interpreter-classic-runtime.cjs
           node .github/tests/interpreter-inline-generator.cjs
+          node .github/tests/interpreter-inline-responses.cjs
       - name: Explain validation boundary
         run: echo 'The catalog check is live. Browser tests simulate the SDK and do not prove a signed-in user can receive a live answer.' >> "$GITHUB_STEP_SUMMARY"

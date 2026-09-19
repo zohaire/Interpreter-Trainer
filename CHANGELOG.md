@@ -1,5 +1,11 @@
 # Changelog
 
+## Inline empty-response repair
+
+- Use GPT-4.1 Mini without reasoning-only parameters for short passage generation.
+- Accept completed content and multiple streamed text formats; exclude reasoning events.
+- Test empty, reasoning-only and provider-error responses as failures, never fabricated passages.
+
 ## Faster inline AI generation — 2026-09-19
 
 - Moved the compact in-exercise passage generator to the low-latency GPT-5 Nano route while retaining Qwen3.6 27B for the full coaching workspace.

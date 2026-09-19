@@ -7,10 +7,8 @@
 </head>
 <body>
 <script>
-  // Inline passages are a short, tightly constrained writing task. Use Puter's
-  // low-latency default model instead of waking the much larger coach model for
-  // every exercise. Keep the coach itself on Qwen for its deeper feedback.
-  const INLINE_MODEL = 'gpt-5-nano';
+  // Use a non-reasoning model so the passage budget is spent on visible text.
+  const INLINE_MODEL = 'gpt-4.1-mini';
   let generationInFlight = false;
 
   function nativeCall(name, value) {
@@ -40,22 +38,33 @@
         {
           model: INLINE_MODEL,
           stream: true,
-          max_tokens: Math.max(200, Math.min(Number(maxTokens) || 600, 1000)),
-          reasoning_effort: 'none',
-          verbosity: 'low'
+          max_tokens: Math.max(200, Math.min(Number(maxTokens) || 600, 1000))
         }
       );
 
-      let answer = '';
-      for await (const part of stream) {
-        if (part?.type === 'error') {
-          throw new Error(part?.error?.message || part?.message || 'The AI stream failed.');
+      // Puter may return either an async stream or a completed response.
+      // Read content only: reasoning and usage events are not practice material.
+      const textOf = part => {
+        if (typeof part === 'string') return part;
+        if (!part || /reasoning|thinking|usage/.test(part.type || '')) return '';
+        if (part.type === 'error' || part.error) {
+          throw new Error(part.error?.message || part.message || 'The AI request failed.');
         }
-        answer += typeof part === 'string'
-          ? part
-          : (typeof part?.text === 'string'
-              ? part.text
-              : (typeof part?.delta?.content === 'string' ? part.delta.content : ''));
+        if (typeof part.text === 'string') return part.text;
+        if (part.type === 'response.output_text.delta' && typeof part.delta === 'string') return part.delta;
+        const content = part.delta?.content ?? part.choices?.[0]?.delta?.content ??
+          part.message?.content ?? part.choices?.[0]?.message?.content;
+        if (typeof content === 'string') return content;
+        if (Array.isArray(content)) return content
+          .filter(item => item?.type === 'text' || item?.type === 'output_text')
+          .map(item => item.text || '').join('');
+        return '';
+      };
+      let answer = '';
+      if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
+        for await (const part of stream) answer += textOf(part);
+      } else {
+        answer = textOf(stream);
       }
 
       if (!answer.trim()) throw new Error('The AI returned an empty passage.');

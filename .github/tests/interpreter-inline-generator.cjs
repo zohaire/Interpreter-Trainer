@@ -51,14 +51,29 @@ const watchdog = setTimeout(() => {
 
     const state = await page.evaluate(() => ({ requests: window.__requests, generated: window.__generated, failures: window.__generatorErrors }));
     assert.equal(state.requests.length, 1);
-    assert.equal(state.requests[0].options.model, 'qwen/qwen3.6-27b');
+    assert.equal(state.requests[0].options.model, 'gpt-5-nano');
     assert.equal(state.requests[0].options.stream, true);
     assert.equal(state.requests[0].options.max_tokens, 600);
+    assert.equal(state.requests[0].options.reasoning_effort, 'none');
+    assert.equal(state.requests[0].options.verbosity, 'low');
     assert.match(state.requests[0].messages[1].content, /consecutive interpretation/);
     assert.match(state.requests[0].messages[1].content, /French/);
     assert.match(state.requests[0].messages[1].content, /Arabic \(MSA\)/);
     assert.match(state.generated[0], /Generated first paragraph/);
     assert.deepEqual(state.failures, []);
+
+    await page.evaluate(() => {
+      window.__holdGeneration = true;
+      const originalChat = window.puter.ai.chat;
+      window.puter.ai.chat = async (...args) => {
+        await new Promise(resolve => setTimeout(resolve, 75));
+        return originalChat(...args);
+      };
+      window.generatePracticeText('First rapid request.', 360);
+      window.generatePracticeText('Duplicate rapid request.', 360);
+    });
+    await page.waitForFunction(() => window.__generated.length === 2);
+    assert.equal(await page.evaluate(() => window.__requests.length), 2, 'rapid duplicate generation must be ignored');
 
     await page.evaluate(() => { window.__failNext = true; window.generatePracticeText('Try another passage.', 360); });
     await page.waitForFunction(() => window.__generatorErrors.length === 1);

@@ -1,5 +1,11 @@
 # Changelog
 
+## Faster inline AI generation — 2026-09-19
+
+- Moved the compact in-exercise passage generator to the low-latency GPT-5 Nano route while retaining Qwen3.6 27B for the full coaching workspace.
+- Disabled reasoning for the constrained passage-writing request and requested low verbosity to reduce time to first token and total generation time.
+- Added a browser regression check that rejects duplicate rapid generation calls while a passage is already in flight.
+
 ## Inline AI practice generation — 2026-09-08
 
 - Added a compact generator sheet to Simultaneous, Shadowing, Consecutive and Live Transcription, inserting clean passages without leaving the exercise.

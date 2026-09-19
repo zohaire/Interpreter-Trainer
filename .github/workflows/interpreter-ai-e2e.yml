@@ -22,7 +22,7 @@ jobs:
           set -euo pipefail
           curl --location --fail --silent --show-error --max-time 45 \
             https://api.puter.com/puterai/chat/models/details --output /tmp/puter-models.json
-          node -e "const {models}=require('/tmp/puter-models.json'); if(!models.some(m=>m.id==='qwen/qwen3.6-27b'||(m.aliases||[]).includes('qwen/qwen3.6-27b'))) throw Error('Restored model missing from live catalog');"
+          node -e "const {models}=require('/tmp/puter-models.json'); for (const id of ['qwen/qwen3.6-27b','gpt-5-nano']) if(!models.some(m=>m.id===id||(m.aliases||[]).includes(id))) throw Error(id+' missing from live catalog');"
       - name: Install browser test runtime
         working-directory: /tmp
         run: |

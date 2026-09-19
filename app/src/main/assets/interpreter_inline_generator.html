@@ -7,7 +7,11 @@
 </head>
 <body>
 <script>
-  const INLINE_MODEL = 'qwen/qwen3.6-27b';
+  // Inline passages are a short, tightly constrained writing task. Use Puter's
+  // low-latency default model instead of waking the much larger coach model for
+  // every exercise. Keep the coach itself on Qwen for its deeper feedback.
+  const INLINE_MODEL = 'gpt-5-nano';
+  let generationInFlight = false;
 
   function nativeCall(name, value) {
     try { window.InlineAiNative?.[name]?.(String(value ?? '')); } catch (_) {}
@@ -21,6 +25,8 @@
   }
 
   window.generatePracticeText = async function(prompt, maxTokens) {
+    if (generationInFlight) return;
+    generationInFlight = true;
     try {
       await ensureConnected();
       const stream = await puter.ai.chat(
@@ -35,7 +41,9 @@
           model: INLINE_MODEL,
           stream: true,
           max_tokens: Math.max(200, Math.min(Number(maxTokens) || 600, 1000)),
-          temperature: 0.55
+          temperature: 0.55,
+          reasoning_effort: 'none',
+          verbosity: 'low'
         }
       );
 
@@ -55,6 +63,8 @@
       nativeCall('onGenerated', answer);
     } catch (error) {
       nativeCall('onError', error?.message || error || 'Could not generate a passage.');
+    } finally {
+      generationInFlight = false;
     }
   };
 
@@ -62,4 +72,3 @@
 </script>
 </body>
 </html>
-

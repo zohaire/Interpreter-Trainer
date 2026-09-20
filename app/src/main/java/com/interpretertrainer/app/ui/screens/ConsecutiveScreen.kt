@@ -53,7 +53,7 @@ fun ConsecutiveScreen(
     var showAiGenerator by rememberSaveable { mutableStateOf(false) }
 
     val isWebSource = !webSourceUrl.isNullOrBlank()
-    val hasAiSource = aiSourceText.isNotBlank()
+    val hasAiSource = aiSourceText.isNotBlank() && sourceName == null
     val hasSource = sourceName != null || hasAiSource
     val hasNativeSource = sourceName != null && !isWebSource && !hasAiSource
 
@@ -355,6 +355,15 @@ fun ConsecutiveScreen(
         sourceLanguage = sourceLang,
         targetLanguage = targetLang,
         onDismiss = { showAiGenerator = false },
+        onAudioGenerated = { generated, uri ->
+            media.pause()
+            media.load(uri)
+            webSourceUrl = null
+            mediaUrl = ""
+            sourceName = "AI-generated practice audio"
+            aiSourceText = generated
+            resetSegments()
+        },
         onGenerated = { generated ->
             media.pause()
             media.clear()

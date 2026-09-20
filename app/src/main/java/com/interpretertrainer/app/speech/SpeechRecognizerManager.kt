@@ -1,6 +1,7 @@
 package com.interpretertrainer.app.speech
 
 import android.Manifest
+import com.interpretertrainer.app.media.TranscriptionPlayback
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -88,7 +89,15 @@ class SpeechRecognizerManager(private val context: Context) : RecognitionListene
                 putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
             }
             _state.value = _state.value.copy(isListening = true, error = null)
-            recognizer?.startListening(intent)
+            TranscriptionPlayback.beforeRecognition()
+            val token = restartToken
+            mainHandler.postDelayed({
+                if (shouldListen && token == restartToken && MicrophoneSessionCoordinator.isOwner(ownerId)) {
+                    runCatching { recognizer?.startListening(intent) }.onFailure {
+                        scheduleRestart(650L, recreate = true)
+                    }
+                }
+            }, 120L)
         }.onFailure {
             _state.value = _state.value.copy(isListening = false, error = it.message ?: "Could not start speech recognition")
             scheduleRestart(550L, recreate = true)
@@ -134,6 +143,8 @@ class SpeechRecognizerManager(private val context: Context) : RecognitionListene
     }
 
     override fun onReadyForSpeech(params: Bundle?) {
+        if (!shouldListen) return
+        TranscriptionPlayback.recognitionReady()
         _state.value = _state.value.copy(isListening = true, error = null)
     }
 

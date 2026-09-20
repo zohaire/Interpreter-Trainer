@@ -22,7 +22,7 @@
     }
   }
 
-  window.generatePracticeText = async function(prompt, maxTokens) {
+  window.generatePracticeText = async function(prompt, maxTokens, output = 'text', voice = 'nova') {
     if (generationInFlight) return;
     generationInFlight = true;
     try {
@@ -68,7 +68,31 @@
       }
 
       if (!answer.trim()) throw new Error('The AI returned an empty passage.');
-      nativeCall('onGenerated', answer);
+      if (output === 'audio') {
+        // Keep each synthesis request under the provider's character limit.
+        const chunks = answer.match(/[\s\S]{1,2600}(?:\s|$)|[\s\S]{1,2600}/g) || [answer];
+        const blobs = [];
+        for (const chunk of chunks) {
+          const audio = await puter.ai.txt2speech(chunk, {
+            provider:'openai', model:'gpt-4o-mini-tts',
+            voice:['nova','sage','onyx'].includes(voice) ? voice : 'nova',
+            response_format:'mp3', instructions:'Read clearly and naturally in the language of the text. Use Modern Standard Arabic for Arabic.'
+          });
+          const response = await fetch(audio.src);
+          if (!response.ok) throw new Error('Could not download the generated audio.');
+          blobs.push(await response.blob());
+          if (audio.src.startsWith('blob:')) URL.revokeObjectURL(audio.src);
+        }
+        const blob = new Blob(blobs, {type:'audio/mpeg'});
+        if (!blob.size || blob.size > 8 * 1024 * 1024) throw new Error('Generated audio is empty or too large. Try a shorter passage.');
+        const data = await new Promise((resolve,reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = () => reject(new Error('Could not save generated audio.'));
+          reader.readAsDataURL(blob);
+        });
+        nativeCall('onAudioGenerated', JSON.stringify({text:answer, data}));
+      } else nativeCall('onGenerated', answer);
     } catch (error) {
       nativeCall('onError', error?.message || error || 'Could not generate a passage.');
     } finally {

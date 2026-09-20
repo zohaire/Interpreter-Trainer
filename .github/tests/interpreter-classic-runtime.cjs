@@ -73,6 +73,7 @@ const watchdog = setTimeout(() => {
       };`
     }));
     await page.goto('https://interpreter-trainer.app/', { waitUntil: 'load' });
+    await page.addScriptTag({ path: 'app/src/main/assets/interpreter_sentence_queue.js' });
     await page.addScriptTag({ content: enhancement });
     await page.addScriptTag({ content: professionalVoice });
     await page.addScriptTag({ path: 'app/src/main/assets/interpreter_standard_arabic.js' });
@@ -121,6 +122,26 @@ const watchdog = setTimeout(() => {
 
     await page.click('#voiceCallLaunch');
     await page.waitForFunction(() => window.__voiceStarts > 0 && document.getElementById('voiceCallOverlay').classList.contains('active'));
+    await page.evaluate(async () => {
+      window.__streamFinished = false;
+      window.puter.ai.chat = async (messages, options) => {
+        window.__voiceOptions = options;
+        return (async function* () {
+          yield {text:'First sentence. '};
+          await new Promise(resolve => window.__releaseStream = resolve);
+          yield {text:'Second sentence.'};
+          window.__streamFinished = true;
+        })();
+      };
+      document.getElementById('chatInput').value = 'Explain interpreting briefly';
+      window.__voiceTurn = window.sendChat(true);
+    });
+    await page.waitForFunction(() => window.__speechRequests.some(r => r.text === 'First sentence.'));
+    assert.equal(await page.evaluate(() => window.__streamFinished), false, 'Speech must start before the full answer arrives');
+    assert.equal(await page.evaluate(() => window.__voiceOptions.model), 'gpt-4.1-mini');
+    await page.evaluate(() => window.__releaseStream());
+    await page.waitForFunction(() => !busy);
+    await page.waitForFunction(() => window.__speechRequests.some(r => r.text === 'Second sentence.'));
     await page.click('#voiceEnd');
     assert.ok(await page.evaluate(() => window.__voiceStops > 0));
     assert.equal(await page.locator('#voiceCallOverlay').evaluate(n => n.classList.contains('active')), false);

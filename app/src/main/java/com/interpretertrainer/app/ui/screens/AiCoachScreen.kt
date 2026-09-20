@@ -506,6 +506,8 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
     // This script owns the selectable neural voice profiles. It must be injected
     // after the enhancement creates the call UI; bundling it as an asset alone
     // does not activate the voices.
+    val sentenceQueue = context.assets.open("interpreter_sentence_queue.js")
+        .bufferedReader(Charsets.UTF_8).use { it.readText() }
     val professionalVoice = context.assets.open("interpreter_professional_voice.js")
         .bufferedReader(Charsets.UTF_8).use { it.readText() }
 
@@ -531,6 +533,7 @@ private fun createCoachWebView(context: Context, bridge: PracticeContextBridge):
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
             if (!isClassicCoachOrigin(url?.let(Uri::parse))) return
+            view?.evaluateJavascript(sentenceQueue, null)
             view?.evaluateJavascript(coachEnhancementScript(), null)
             view?.evaluateJavascript(professionalVoice, null)
             view?.evaluateJavascript(arabicPolicy, null)
@@ -562,7 +565,7 @@ private fun coachEnhancementScript(): String = """
   const speakVoice = (text, lang) => {
     try {
       if (typeof window.__professionalVoiceSpeak === 'function') {
-        return window.__professionalVoiceSpeak(text, lang) === true;
+        if (window.__professionalVoiceSpeak(text, lang) === true) return true;
       }
       if (typeof window.playNaturalInterpreterVoice === 'function') {
         return window.playNaturalInterpreterVoice(text, lang) === true;
@@ -570,7 +573,10 @@ private fun coachEnhancementScript(): String = """
     } catch (_) {}
     return native?.speakText?.(text, lang) === true;
   };
+  let speechQueue = null;
+  let voiceEpoch = 0;
   const stopVoice = () => {
+    try { window.__stopProfessionalVoice?.(); } catch (_) {}
     try { window.stopNaturalInterpreterVoice?.(); } catch (_) {}
     try { native?.stopSpeaking?.(); } catch (_) {}
   };
@@ -620,7 +626,7 @@ private fun coachEnhancementScript(): String = """
     .voice-orb.listening { transform:scale(1.07); box-shadow:0 0 0 12px color-mix(in srgb,var(--accent) 8%,transparent),0 26px 80px color-mix(in srgb,var(--accent) 34%,transparent); animation:voicePulse 1.25s infinite ease-in-out; }
     .voice-orb.speaking { transform:scale(1.04); animation:voiceSpeak 1.05s infinite ease-in-out; }
     .voice-call-status { margin-top:30px; font-size:18px; font-weight:760; text-align:center; }
-    .voice-call-live { margin-top:10px; width:min(560px,92vw); min-height:52px; color:var(--muted); text-align:center; font-size:14px; line-height:1.5; }
+    .voice-call-live { margin-top:10px; width:min(560px,92vw); min-height:52px; max-height:38vh; overflow-y:auto; color:var(--muted); text-align:center; font-size:14px; line-height:1.5; }
     .voice-call-controls { display:flex; align-items:center; gap:18px; }
     .voice-round-control {
       width:58px; height:58px; border-radius:50%; border:1px solid var(--border); background:var(--surface-soft); color:var(--text);
@@ -731,9 +737,9 @@ private fun coachEnhancementScript(): String = """
 
   const scheduleListening = (delay = 350) => {
     clearTimeout(callRetryTimer);
-    if (!window.__voiceCallActive || window.__voiceCallMuted || busy) return;
+    if (!window.__voiceCallActive || window.__voiceCallMuted || busy || speechQueue?.active) return;
     callRetryTimer = setTimeout(() => {
-      if (!window.__voiceCallActive || window.__voiceCallMuted || busy) return;
+      if (!window.__voiceCallActive || window.__voiceCallMuted || busy || speechQueue?.active) return;
       const callLang = document.getElementById('callVoiceLang')?.value || 'en-US';
       native?.setVoiceLanguage?.(callLang);
       callStatus('Listening…', 'Speak now');
@@ -762,6 +768,9 @@ private fun coachEnhancementScript(): String = """
   };
 
   window.endVoiceCall = () => {
+    voiceEpoch++;
+    speechQueue?.cancel();
+    speechQueue = null;
     window.__voiceCallActive = false;
     window.__voiceCallMuted = false;
     window.__voiceOneShot = false;
@@ -859,6 +868,7 @@ private fun coachEnhancementScript(): String = """
   };
 
   window.__nativeSpeechFinished = () => {
+    if (speechQueue?.active) { speechQueue.speechEnded(); return; }
     if (!window.__voiceCallActive) return;
     setOrbState(null);
     callStatus('Your turn', 'The microphone is reopening…');
@@ -933,18 +943,37 @@ private fun coachEnhancementScript(): String = """
     updateSendState();
     showTyping();
 
+    const voiceResponse = fromVoice || window.__voiceCallActive || window.__voiceOneShot;
+    const epoch = voiceEpoch;
+    const callReply = window.__voiceCallActive;
+    if (voiceResponse) {
+      speechQueue?.cancel();
+      const lang = document.getElementById(callReply ? 'callVoiceLang' : 'voiceLang')?.value || 'en-US';
+      speechQueue = window.createInterpreterSpeechQueue({
+        speak: text => epoch === voiceEpoch && speakVoice(text, lang),
+        stop: stopVoice,
+        onDone: () => {
+          if (!window.__voiceCallActive || epoch !== voiceEpoch) return;
+          setOrbState(null);
+          callStatus('Your turn', 'The microphone is reopening…');
+          scheduleListening(150);
+        }
+      });
+    }
     let streamRow = null;
     let answer = '';
     try {
       const system = `You are Interpreter AI, a fast professional coach for interpreters. Work especially well across Arabic, English and French. Help with simultaneous and consecutive interpreting, shadowing, transcription, note-taking, memory, terminology, reformulation, numbers, names, fluency and delivery. In voice conversations, sound natural, concise and conversational rather than like a written report. Respond directly in the user's language. Never invent scores, transcripts, history or app facts. The authoritative app/context information below is reliable.\n\n${'$'}{nativePracticeContext()}`;
-      const conversation = [{ role:'system', content:system }, ...history.slice(-8), { role:'user', content:text }];
+      const spokenRule = voiceResponse ? '\nVOICE TURN: Reply in two or three short sentences, normally under 65 words. Start with the direct answer. Use plain spoken text without markdown or bullet lists. Expand only when explicitly asked for detail.' : '';
+      const conversation = [{ role:'system', content:system + spokenRule }, ...history.slice(-8), { role:'user', content:text }];
       const stream = await puter.ai.chat(conversation, {
-        model:'qwen/qwen3.6-27b',
+        model:voiceResponse ? 'gpt-4.1-mini' : 'qwen/qwen3.6-27b',
         stream:true,
-        max_tokens:fromVoice ? 420 : 650,
+        max_tokens:voiceResponse ? 260 : 650,
         temperature:0.24
       });
 
+      if (voiceResponse && epoch !== voiceEpoch) return;
       hideTyping();
       streamRow = messageElement('assistant', '');
       streamRow.dataset.streaming = '1';
@@ -952,6 +981,8 @@ private fun coachEnhancementScript(): String = """
       const bubble = streamRow.querySelector('.bubble');
 
       for await (const part of stream) {
+        if (voiceResponse && epoch !== voiceEpoch) return;
+        if (part?.type === 'reasoning') continue;
         if (part?.type === 'error') throw new Error(part?.error?.message || part?.message || 'Streaming request failed.');
         const chunk = typeof part === 'string'
           ? part
@@ -960,10 +991,16 @@ private fun coachEnhancementScript(): String = """
               : (typeof part?.delta?.content === 'string' ? part.delta.content : ''));
         if (!chunk) continue;
         answer += chunk;
+        if (voiceResponse) {
+          speechQueue?.append(chunk);
+          const liveText = document.getElementById('voiceCallLive');
+          if (liveText && callReply) liveText.textContent = answer.replace(/[*#`]/g, '');
+        }
         if (bubble) bubble.textContent = answer;
         requestAnimationFrame(scrollToBottom);
       }
 
+      if (voiceResponse && epoch !== voiceEpoch) { streamRow?.remove(); return; }
       answer = answer.trim();
       if (!answer) throw new Error('The AI returned an empty response.');
       streamRow?.remove();
@@ -975,22 +1012,12 @@ private fun coachEnhancementScript(): String = """
       addMessage('assistant', answer);
       setStatus('Online · ready', 'ok');
 
-      if (window.__voiceCallActive) {
-        callStatus('Interpreter AI is speaking', answer);
-        const callLang = document.getElementById('callVoiceLang')?.value || 'en-US';
-        const started = speakVoice(answer, callLang);
-        if (!started) {
-          callStatus('Your turn', 'Voice output is unavailable; listening again.');
-          setTimeout(() => scheduleListening(150), 0);
-        }
-      } else if (window.__voiceAutoSpeak || window.__voiceOneShot) {
-        const lang = document.getElementById('voiceLang')?.value || 'en-US';
-        speakVoice(answer, lang);
-      }
+      if (voiceResponse && epoch === voiceEpoch) speechQueue?.finish();
 
       window.__voiceAutoSpeak = false;
       window.__voiceOneShot = false;
     } catch (error) {
+      if (voiceResponse) { speechQueue?.cancel(); speechQueue = null; }
       hideTyping();
       streamRow?.remove();
       const message = error?.msg || error?.message || String(error);

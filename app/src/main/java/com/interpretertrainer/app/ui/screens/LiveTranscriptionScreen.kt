@@ -1,6 +1,9 @@
 package com.interpretertrainer.app.ui.screens
 
 import android.Manifest
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.ui.PlayerView
+import com.interpretertrainer.app.media.MediaController
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +37,8 @@ fun LiveTranscriptionScreen(
     sessionViewModel: SessionViewModel
 ) {
     val context = LocalContext.current
+    val generatedMedia = remember { MediaController(context) }
+    var hasGeneratedAudio by remember { mutableStateOf(false) }
     val speech = remember { SpeechRecognizerManager(context.applicationContext) }
     val state by speech.state.collectAsState()
     val aiPayload by AiPracticeBridge.payload.collectAsState()
@@ -49,7 +54,7 @@ fun LiveTranscriptionScreen(
         }
     }
 
-    DisposableEffect(Unit) { onDispose { speech.destroy() } }
+    DisposableEffect(Unit) { onDispose { speech.destroy(); generatedMedia.release() } }
 
     LaunchedEffect(aiPayload?.id) {
         val payload = aiPayload
@@ -98,6 +103,10 @@ fun LiveTranscriptionScreen(
                 targetLabel = "Text"
             )
 
+            if (hasGeneratedAudio) AndroidView(
+                factory = { PlayerView(it).apply { player = generatedMedia.player; useController = true } },
+                modifier = Modifier.fillMaxWidth().height(100.dp)
+            )
             SectionCard {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column {
@@ -205,6 +214,15 @@ fun LiveTranscriptionScreen(
         sourceLanguage = language,
         targetLanguage = language,
         onDismiss = { showAiGenerator = false },
-        onGenerated = { generated -> aiReferenceText = generated }
+        onAudioGenerated = { generated, uri ->
+            aiReferenceText = generated
+            generatedMedia.load(uri)
+            hasGeneratedAudio = true
+        },
+        onGenerated = { generated ->
+            generatedMedia.clear()
+            hasGeneratedAudio = false
+            aiReferenceText = generated
+        }
     )
 }

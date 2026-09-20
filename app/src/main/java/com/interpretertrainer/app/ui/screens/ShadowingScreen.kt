@@ -413,6 +413,16 @@ fun ShadowingScreen(
         sourceLanguage = language,
         targetLanguage = language,
         onDismiss = { showAiGenerator = false },
+        onAudioGenerated = { generated, uri ->
+            stopSource()
+            sourceMedia.load(uri)
+            webSourceUrl = null
+            mediaUrl = ""
+            sourceName = "AI-generated practice audio"
+            sourceText = generated
+            hasNativeMedia = true
+            transcript = ""
+        },
         onGenerated = { generated ->
             stopSource()
             sourceMedia.clear()

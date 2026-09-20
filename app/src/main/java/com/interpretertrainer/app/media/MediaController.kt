@@ -9,6 +9,17 @@ import androidx.media3.exoplayer.ExoPlayer
 class MediaController(context: Context) {
     val player: ExoPlayer = ExoPlayer.Builder(context.applicationContext).build()
 
+    private var resumeAfterRecognition = false
+    init {
+        TranscriptionPlayback.register(this) { ready ->
+            if (!ready) resumeAfterRecognition = player.isPlaying
+            else if (resumeAfterRecognition) {
+                resumeAfterRecognition = false
+                player.play()
+            }
+        }
+    }
+
     fun load(uri: Uri) {
         player.setMediaItem(MediaItem.fromUri(uri))
         player.prepare()
@@ -25,12 +36,12 @@ class MediaController(context: Context) {
     }
 
     fun play() = player.play()
-    fun pause() = player.pause()
+    fun pause() { resumeAfterRecognition = false; player.pause() }
     fun seekTo(positionMs: Long) = player.seekTo(positionMs.coerceAtLeast(0L))
     fun setSpeed(speed: Float) { player.playbackParameters = PlaybackParameters(speed) }
     fun clear() {
         player.stop()
         player.clearMediaItems()
     }
-    fun release() = player.release()
+    fun release() { TranscriptionPlayback.unregister(this); player.release() }
 }

@@ -390,6 +390,16 @@ fun SimultaneousScreen(
         sourceLanguage = sourceLang,
         targetLanguage = targetLang,
         onDismiss = { showAiGenerator = false },
+        onAudioGenerated = { generated, uri ->
+            sourceMedia.pause()
+            sourceMedia.load(uri)
+            webSourceUrl = null
+            mediaUrl = ""
+            sourceName = "AI-generated practice audio"
+            sourceText = generated
+            hasNativeMedia = true
+            resetPracticeForNewSource()
+        },
         onGenerated = { generated ->
             sourceMedia.pause()
             sourceMedia.clear()

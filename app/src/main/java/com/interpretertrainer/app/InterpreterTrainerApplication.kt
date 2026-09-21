@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.Environment
 import com.interpretertrainer.app.data.database.InterpreterDatabase
 import com.interpretertrainer.app.data.repository.RecordingFileStore
+import com.interpretertrainer.app.data.repository.PracticeLibraryRepository
 import com.interpretertrainer.app.data.repository.SessionRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,9 +25,11 @@ class InterpreterTrainerApplication : Application() {
             recordingFileStore = RecordingFileStore(recordingRoots)
         )
     }
+    val practiceLibraryRepository by lazy { PracticeLibraryRepository(database.practiceLibraryDao()) }
 
     override fun onCreate() {
         super.onCreate()
         applicationScope.launch { sessionRepository.pruneOrphanRecordings() }
+        applicationScope.launch { practiceLibraryRepository.seedCuratedCatalog() }
     }
 }

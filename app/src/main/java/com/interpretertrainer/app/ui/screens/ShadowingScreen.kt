@@ -30,6 +30,7 @@ import com.interpretertrainer.app.ai.PracticeGenerationMode
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.media.MediaController
 import com.interpretertrainer.app.media.MediaLinkResolver
+import com.interpretertrainer.app.media.LibraryPracticeBridge
 import com.interpretertrainer.app.media.ShadowingRecorder
 import com.interpretertrainer.app.model.LanguageOption
 import com.interpretertrainer.app.model.PracticeMode
@@ -48,6 +49,7 @@ fun ShadowingScreen(
     val recordingMedia = remember { MediaController(context) }
     val recorder = remember { ShadowingRecorder(context.applicationContext) }
     val aiPayload by AiPracticeBridge.payload.collectAsState()
+    val libraryPayload by LibraryPracticeBridge.payload.collectAsState()
 
     var language by rememberSaveable { mutableStateOf(LanguageOption.ENGLISH_US) }
     var sourceName by rememberSaveable { mutableStateOf<String?>(null) }
@@ -109,6 +111,41 @@ fun ShadowingScreen(
             transcript = ""
             errorMessage = null
             AiPracticeBridge.consume(payload.id)
+        }
+    }
+
+    LaunchedEffect(libraryPayload?.token) {
+        val payload = libraryPayload
+        if (payload != null && payload.mode == "SHADOWING") {
+            stopSource()
+            sourceMedia.clear()
+            sourceName = payload.sourceName
+            sourceText = ""
+            transcript = ""
+            recordingPath = null
+            recordingElapsed = 0L
+            errorMessage = null
+            when {
+                !payload.mediaUri.isNullOrBlank() -> {
+                    sourceMedia.load(Uri.parse(payload.mediaUri))
+                    hasNativeMedia = true
+                    webSourceUrl = null
+                    mediaUrl = ""
+                }
+                !payload.sourceUrl.isNullOrBlank() -> {
+                    val resolved = MediaLinkResolver.resolve(payload.sourceUrl).getOrNull()
+                    if (resolved?.usesNativePlayer == true) {
+                        sourceMedia.loadUrl(resolved.playbackUrl)
+                        hasNativeMedia = true
+                        webSourceUrl = null
+                    } else {
+                        hasNativeMedia = false
+                        webSourceUrl = resolved?.playbackUrl ?: payload.sourceUrl
+                    }
+                    mediaUrl = payload.sourceUrl
+                }
+            }
+            LibraryPracticeBridge.consume(payload.token)
         }
     }
 

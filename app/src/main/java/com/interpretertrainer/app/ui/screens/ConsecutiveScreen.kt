@@ -23,6 +23,7 @@ import com.interpretertrainer.app.ai.PracticeGenerationMode
 import com.interpretertrainer.app.data.database.PracticeSessionEntity
 import com.interpretertrainer.app.media.MediaController
 import com.interpretertrainer.app.media.MediaLinkResolver
+import com.interpretertrainer.app.media.LibraryPracticeBridge
 import com.interpretertrainer.app.model.LanguageOption
 import com.interpretertrainer.app.model.PracticeMode
 import com.interpretertrainer.app.util.formatDuration
@@ -37,6 +38,7 @@ fun ConsecutiveScreen(
     val context = LocalContext.current
     val media = remember { MediaController(context) }
     val aiPayload by AiPracticeBridge.payload.collectAsState()
+    val libraryPayload by LibraryPracticeBridge.payload.collectAsState()
     var sourceName by rememberSaveable { mutableStateOf<String?>(null) }
     var webSourceUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var mediaUrl by rememberSaveable { mutableStateOf("") }
@@ -76,6 +78,36 @@ fun ConsecutiveScreen(
             mediaUrl = ""
             resetSegments()
             AiPracticeBridge.consume(payload.id)
+        }
+    }
+
+    LaunchedEffect(libraryPayload?.token) {
+        val payload = libraryPayload
+        if (payload != null && payload.mode == "CONSECUTIVE") {
+            media.pause()
+            media.clear()
+            sourceName = payload.sourceName
+            aiSourceText = ""
+            sourceError = null
+            when {
+                !payload.mediaUri.isNullOrBlank() -> {
+                    media.load(Uri.parse(payload.mediaUri))
+                    webSourceUrl = null
+                    mediaUrl = ""
+                }
+                !payload.sourceUrl.isNullOrBlank() -> {
+                    val resolved = MediaLinkResolver.resolve(payload.sourceUrl).getOrNull()
+                    if (resolved?.usesNativePlayer == true) {
+                        media.loadUrl(resolved.playbackUrl)
+                        webSourceUrl = null
+                    } else {
+                        webSourceUrl = resolved?.playbackUrl ?: payload.sourceUrl
+                    }
+                    mediaUrl = payload.sourceUrl
+                }
+            }
+            resetSegments()
+            LibraryPracticeBridge.consume(payload.token)
         }
     }
 

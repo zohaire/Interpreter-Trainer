@@ -13,6 +13,7 @@ import com.interpretertrainer.app.ui.InterpreterTrainerApp
 import com.interpretertrainer.app.ui.theme.InterpreterTrainerTheme
 import com.interpretertrainer.app.ui.theme.ThemePreferences
 import com.interpretertrainer.app.viewmodel.SessionViewModel
+import com.interpretertrainer.app.viewmodel.PracticeLibraryViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -26,8 +27,12 @@ class MainActivity : ComponentActivity() {
                 val sessionViewModel: SessionViewModel = viewModel(
                     factory = SessionViewModel.Factory(app.sessionRepository)
                 )
+                val practiceLibraryViewModel: PracticeLibraryViewModel = viewModel(
+                    factory = PracticeLibraryViewModel.Factory(app.practiceLibraryRepository)
+                )
                 InterpreterTrainerApp(
                     sessionViewModel = sessionViewModel,
+                    practiceLibraryViewModel = practiceLibraryViewModel,
                     themeMode = themeMode,
                     onThemeModeChange = { mode ->
                         ThemePreferences.set(this, mode)

@@ -19,6 +19,7 @@ import com.interpretertrainer.app.ai.AiPracticeBridge
 import com.interpretertrainer.app.ui.screens.*
 import com.interpretertrainer.app.ui.theme.ThemeMode
 import com.interpretertrainer.app.viewmodel.SessionViewModel
+import com.interpretertrainer.app.viewmodel.PracticeLibraryViewModel
 
 object Routes {
     const val HOME = "home"
@@ -29,12 +30,14 @@ object Routes {
     const val AI_COACH = "ai-coach"
     const val HISTORY = "history"
     const val PRIVACY = "privacy"
+    const val PRACTICE_LIBRARY = "practice-library"
     const val HISTORY_DETAIL = "history/{id}"
 }
 
 @Composable
 fun InterpreterTrainerApp(
     sessionViewModel: SessionViewModel,
+    practiceLibraryViewModel: PracticeLibraryViewModel,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit
 ) {
@@ -119,6 +122,13 @@ fun InterpreterTrainerApp(
             )
         }
         composable(Routes.PRIVACY) { PrivacyScreen(onBack = navController::popBackStack) }
+        composable(Routes.PRACTICE_LIBRARY) {
+            PracticeLibraryScreen(
+                onBack = navController::popBackStack,
+                onNavigate = navigate,
+                viewModel = practiceLibraryViewModel
+            )
+        }
         composable(
             Routes.HISTORY_DETAIL,
             arguments = listOf(navArgument("id") { type = NavType.LongType })

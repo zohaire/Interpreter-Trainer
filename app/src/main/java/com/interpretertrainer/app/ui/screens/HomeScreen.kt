@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Headphones
@@ -142,6 +143,7 @@ fun HomeScreen(
                 selectedTab = selectedTab,
                 onHome = { coroutineScope.launch { listState.animateScrollToItem(0) } },
                 onPractice = { coroutineScope.launch { listState.animateScrollToItem(1) } },
+                onLibrary = { onNavigate(Routes.PRACTICE_LIBRARY) },
                 onAiCoach = { onNavigate(Routes.AI_COACH) },
                 onHistory = { onNavigate(Routes.HISTORY) }
             )
@@ -174,10 +176,43 @@ fun HomeScreen(
                 )
             }
             item(key = "practice-grid") {
-                PracticeGrid(onNavigate = onNavigate, dark = dark)
+                Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                    PracticeLibraryBanner(onOpen = { onNavigate(Routes.PRACTICE_LIBRARY) }, dark = dark)
+                    PracticeGrid(onNavigate = onNavigate, dark = dark)
+                }
             }
             item(key = "dashboard-footer") {
                 DashboardFooter(dark = dark, onOpenPrivacy = { onNavigate(Routes.PRIVACY) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun PracticeLibraryBanner(onOpen: () -> Unit, dark: Boolean) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+        Card(
+            onClick = onOpen,
+            modifier = Modifier.fillMaxWidth().widthIn(max = 744.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = if (dark) Color(0xFF10284B) else Color(0xFFEAF2FF)),
+            border = BorderStroke(1.dp, if (dark) Color(0xFF31517B) else Color(0xFFB9CFF0))
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Surface(shape = CircleShape, color = InterpreterBlue, modifier = Modifier.size(58.dp)) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.CollectionsBookmark, contentDescription = null, tint = Color.White, modifier = Modifier.size(29.dp))
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Practice Library", style = MaterialTheme.typography.titleLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    Text("Authentic UN speeches, curated training windows, and your own sources.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Icon(Icons.Default.ChevronRight, contentDescription = null)
             }
         }
     }
@@ -668,6 +703,7 @@ private fun DashboardNavigationBar(
     selectedTab: DashboardTab,
     onHome: () -> Unit,
     onPractice: () -> Unit,
+    onLibrary: () -> Unit,
     onAiCoach: () -> Unit,
     onHistory: () -> Unit
 ) {
@@ -686,6 +722,12 @@ private fun DashboardNavigationBar(
             icon = Icons.Default.Headphones,
             selected = selectedTab == DashboardTab.PRACTICE,
             onClick = onPractice
+        )
+        DashboardNavigationItem(
+            label = "Library",
+            icon = Icons.Default.CollectionsBookmark,
+            selected = false,
+            onClick = onLibrary
         )
         DashboardNavigationItem(
             label = "AI Coach",

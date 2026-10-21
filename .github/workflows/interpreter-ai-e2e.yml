@@ -40,5 +40,6 @@ jobs:
           node .github/tests/interpreter-inline-generator.cjs
           node .github/tests/interpreter-inline-responses.cjs
           node .github/tests/interpreter-media-flow.cjs
+          node --test .github/tests/tiktok-reviewer.cjs
       - name: Explain validation boundary
         run: echo 'The catalog check is live. Browser tests simulate the SDK and do not prove a signed-in user can receive a live answer.' >> "$GITHUB_STEP_SUMMARY"

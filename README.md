@@ -1,14 +1,16 @@
 # TikTok Reviewer
 
-Android creator workspace repurposed from Interpreter Trainer. The launcher opens the new review experience; the previous training implementation remains in source for migration reference but is not part of the active navigation.
+Android creator workspace with a soft blush interface, coral-to-orange actions, brief expandable feedback cards, and a cyan/pink short-video launcher icon. Repurposed from Interpreter Trainer. The launcher opens the new review experience; the previous training implementation remains in source for migration reference but is not part of the active navigation.
 
 ## Creator workflow
 
-1. Select a local video (up to 200 MB and 180 seconds), or enter a script.
-2. Set your niche, target audience/language, and review focus.
-3. Optionally paste real viewer comments and post analytics.
-4. Connect the existing Puter AI account, consent to sharing the supplied evidence, and request a review.
-5. Read prioritized edits, revised hooks, a proposed outline, caption ideas, and an experiment. Copy the report or reopen it from device-local history.
+1. Optionally answer three short creator-profile questions, or skip setup.
+2. Select a local video (up to 200 MB and 180 seconds), or enter a script.
+3. Optionally set your niche, target audience/language, and review focus.
+4. Optionally paste real viewer comments and post analytics.
+5. Connect the existing Puter AI account, consent to sharing the supplied evidence, and request a review.
+6. Read one observed strength and one suggested improvement. Open category cards for detail, try a rewritten hook, or copy the feedback.
+7. Generate three ideas or a seven-day plan from your topic and optional profile. Bookmark favorites in the Saved shelf; history keeps your latest 20 results.
 
 ## AI integration and evidence
 
@@ -18,10 +20,12 @@ Video frames are sampled locally (up to eight JPEG stills). Only these stills an
 
 ## Validation
 
-- `node --test .github/tests/tiktok-reviewer.cjs`
+- `node --test .github/tests/tiktok-reviewer.cjs` (requires Playwright + Chromium; CI installs both)
 - `node --check app/src/main/assets/tiktok_reviewer.js`
 - `./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug`
 
-Android device testing must cover video selection/decoding, Puter popup sign-in, a real text review and a real image review. Local mocked tests do not verify provider availability. Existing training tests cover retained legacy source only.
+Android device testing must cover video selection/decoding, Puter popup sign-in, a real text review and a real image review. Local mocked tests do not verify provider availability. Existing training tests cover retained legacy source only. The creator browser tests cover skippable setup, consent and optional context, text/vision routing, hidden-video isolation, provider failures, ideas/plans, bookmarks/deletion, safe rendering and mobile overflow. The AI is mocked in browser tests.
+
+Public Grow Now store screenshots informed the blush palette, card hierarchy and expandable feedback pattern: https://play.google.com/store/apps/details?id=com.escape.grownow . Onboarding questions and visual assets are original. Automatic TikTok account import and predictive metrics are not implemented.
 
 Application ID is unchanged to preserve installation identity. Existing practice records are not sent to the reviewer. See PRIVACY.md for the new review data flow.

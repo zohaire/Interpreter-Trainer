@@ -2,7 +2,7 @@
 
 The active creator workspace uses Puter for AI sign-in and requests. When you select the content-sharing checkbox and request a review, your script, audience description, comments, metrics and up to eight locally sampled video frames are sent to Puter and the selected AI provider. The original video and audio are not uploaded. Only documents chosen with Android's file picker are accessed. Remove private information from comments before submitting them.
 
-Up to 20 generated reviews and their evidence summaries are stored locally in WebView storage. Use “Delete saved reviews” to remove them. This does not delete provider-side records; provider terms and retention policies apply. Input videos and frames are not included in saved review history. No TikTok account or automatic analytics integration is present.
+Your optional creator profile, plus up to 20 generated reviews, ideas or plans and their evidence summaries, are stored locally in WebView storage. Bookmarks identify favorites within this 20-item history. Idea and plan requests share your topic, profile and any entered audience comments/metrics with Puter when you tap the labeled generation button. Use “Delete saved reviews” to remove them. This does not delete provider-side records; provider terms and retention policies apply. Input videos and frames are not included in saved review history. No TikTok account or automatic analytics integration is present.
 
 The application retains its previous package identity and existing practice database, but the creator workspace does not read or send those practice records. The historical policy below describes inactive legacy training features, not the new reviewer workflow.
 

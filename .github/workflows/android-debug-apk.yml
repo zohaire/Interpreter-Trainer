@@ -25,6 +25,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Verify creator review flow
+        run: node --test .github/tests/tiktok-reviewer.cjs
+
       - name: Set up Java 21
         uses: actions/setup-java@v4
         with:

@@ -138,7 +138,7 @@ function chatMessages(item){return Array.isArray(item?.chat)?item.chat.filter(m=
 function renderReviewChat(){
  const log=$('reviewChatLog');log.replaceChildren();
  for(const message of chatMessages(activeItem)){const bubble=document.createElement('div');bubble.className='chat-bubble '+message.role;const label=document.createElement('strong');label.textContent=message.role==='user'?'You':'Creator coach';const copy=document.createElement('p');copy.textContent=message.content;bubble.append(label,copy);log.append(bubble);}
- $('reviewChatInput').value=text(activeItem?.chatDraft);$('sendReviewChat').disabled=!!chatPendingItem;$('clearReviewChat').disabled=!!chatPendingItem;
+ $('reviewChatInput').value=text(activeItem?.chatDraft);$('reviewChatInput').disabled=!!chatPendingItem;$('sendReviewChat').disabled=!!chatPendingItem;$('clearReviewChat').disabled=!!chatPendingItem;
  $('reviewChatStatus').textContent=chatPendingItem===activeItem?'Thinking…':chatPendingItem?'Another review’s reply is still being prepared.':'';
  log.scrollTop=log.scrollHeight;
 }

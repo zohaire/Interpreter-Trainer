@@ -45,3 +45,32 @@ test('blocked profile lookups do not offer an invented AI review',async()=>{
  await page.locator('#reviewUsername').fill('someone');await page.locator('#fetchProfile').click();await page.waitForFunction(()=>document.getElementById('error').textContent.includes('readable public posts'));
  assert.equal(await page.locator('#profileAnalysisActions').isVisible(),false);assert.equal(await page.evaluate(()=>window.__calls.length),0);await context.close();
 });
+
+test('follow-up chat uses its review, survives reopening and stays isolated from other reviews',async()=>{
+ const {page,context}=await setup();await page.locator('#homeReview').click();await page.locator('#scriptMode').click();await page.locator('#script').fill('A study tip');await page.locator('#consent').check();await page.locator('#review').click();await page.locator('#results').waitFor({state:'visible'});
+ await page.evaluate(()=>{window.__reply='Try opening with a surprising question.';});await page.locator('#reviewChatInput').fill('How can I improve the opening?');await page.locator('#sendReviewChat').click();await page.waitForFunction(()=>document.getElementById('reviewChatLog').textContent.includes('surprising question'));
+ const messages=await page.evaluate(()=>window.__calls[1].messages);assert.match(messages[1].content,/A stronger start/);assert.equal(messages.at(-1).content,'How can I improve the opening?');assert.equal(await page.locator('.chat-bubble').count(),2);
+ await page.locator('#newReview').click();await page.locator('#review').click();await page.locator('#results').waitFor({state:'visible'});assert.equal(await page.locator('.chat-bubble').count(),0);
+ await page.locator('[data-nav=saved]').click();await page.locator('#history .list-card').nth(1).click();assert.equal(await page.locator('.chat-bubble').count(),2);
+ await page.reload();await page.waitForFunction(()=>window.puter);await page.locator('[data-nav=saved]').click();await page.locator('#history .list-card').nth(1).click();assert.equal(await page.locator('.chat-bubble').count(),2);
+ await page.locator('#clearReviewChat').click();assert.equal(await page.locator('.chat-bubble').count(),0);await context.close();
+});
+test('chat provider failure preserves question without inventing a reply',async()=>{
+ const {page,context}=await setup();await page.locator('#homeReview').click();await page.locator('#scriptMode').click();await page.locator('#script').fill('A study tip');await page.locator('#consent').check();await page.locator('#review').click();await page.locator('#results').waitFor({state:'visible'});
+ await page.evaluate(()=>{window.__fail=true;});await page.locator('#reviewChatInput').fill('Give me an example');await page.locator('#sendReviewChat').click();await page.waitForFunction(()=>document.getElementById('reviewChatStatus').textContent.includes('usage limit'));
+ assert.equal(await page.locator('#reviewChatInput').inputValue(),'Give me an example');assert.equal(await page.locator('.chat-bubble').count(),0);assert.equal(await page.locator('#sendReviewChat').isEnabled(),true);await context.close();
+});
+test('video generation requires consent, requests 15-second portrait 1080p and reports shorter output',async()=>{
+ const {page,context}=await setup();await page.locator('[data-nav=videoStudio]').click();
+ await page.evaluate(()=>{window.__videoCalls=[];puter.ai.txt2vid=async(prompt,options)=>{window.__videoCalls.push({prompt,options});const v=document.createElement('video');v.src='https://clips.example/generated.mp4';Object.defineProperty(v,'duration',{value:9});Object.defineProperty(v,'videoWidth',{value:1080});Object.defineProperty(v,'videoHeight',{value:1920});return v;};});
+ await page.locator('#videoPrompt').fill('A rose falling onto a book');await page.locator('#generateVideo').click();assert.equal(await page.evaluate(()=>window.__videoCalls.length),0);
+ await page.locator('#videoGenerateConsent').check();await page.locator('#generateVideo').click();await page.locator('#generatedVideoCard').waitFor({state:'visible'});
+ const call=await page.evaluate(()=>window.__videoCalls[0]);assert.equal(call.options.seconds,15);assert.equal(call.options.size,'1080p');assert.equal(call.options.width,9);assert.equal(call.options.height,16);assert.equal(call.options.provider,'byteplus-video-generation');assert.match(call.options.puter_output_path,/\.mp4$/);assert.equal(call.options.test_mode,undefined);
+ assert.match(await page.locator('#generatedVideoMeta').textContent(),/different from the requested 15/);assert.match(await page.locator('#downloadGeneratedVideo').getAttribute('href'),/^reviewer-download:\/\/video\?url=https/);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await context.close();
+});
+test('video generation blocks duplicate requests and preserves prompt after insufficient credits',async()=>{
+ const {page,context}=await setup();await page.locator('[data-nav=videoStudio]').click();await page.evaluate(()=>{window.__videoCalls=0;puter.ai.txt2vid=()=>{window.__videoCalls++;return new Promise((resolve,reject)=>window.__rejectVideo=reject);};});
+ await page.locator('#videoPrompt').fill('A cinematic sunrise');await page.locator('#videoGenerateConsent').check();await page.locator('#generateVideo').click();assert.equal(await page.locator('#generateVideo').isDisabled(),true);await page.evaluate(()=>document.getElementById('generateVideo').onclick());assert.equal(await page.evaluate(()=>window.__videoCalls),1);
+ await page.evaluate(()=>window.__rejectVideo({code:'insufficient_funds',message:'Not enough credits'}));await page.waitForFunction(()=>document.getElementById('videoGenerationStatus').textContent.includes('balance'));
+ assert.equal(await page.locator('#videoPrompt').inputValue(),'A cinematic sunrise');assert.equal(await page.locator('#generateVideo').isEnabled(),true);assert.equal(await page.locator('#generatedVideoCard').isVisible(),false);await context.close();
+});

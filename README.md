@@ -29,3 +29,11 @@ Android device testing must cover video selection/decoding, Puter popup sign-in,
 Public Grow Now store screenshots informed the blush palette, card hierarchy and expandable feedback pattern: https://play.google.com/store/apps/details?id=com.escape.grownow . Onboarding questions and visual assets are original. Profiles supports public-embed lookup by username without an API key. It returns available account counts, captions and views, not private analytics or predictive metrics.
 
 Application ID is unchanged to preserve installation identity. Existing practice records are not sent to the reviewer. See PRIVACY.md for the new review data flow.
+
+## Review chat and video creation
+
+Ask follow-up questions beneath any review. Conversations stay with their review in local history and can be cleared. The AI sees that feedback and the conversation, not the original video.
+
+The Videos tab requests a 15-second Seedance 2.0 clip through the existing Puter sign-in. Choose vertical or landscape, 1080p or 720p, and generated sound. Prompt sharing and AI credit use require consent. Clips are saved to Puter storage; preview them and use Save to phone for Android Downloads. Generation is not unlimited free. The provider can shorten clips for insufficient balance; actual duration and dimensions are checked from returned metadata and discrepancies are displayed. Keep the app open during generation. No automatic retries or model fallback that could spend additional credits.
+
+Integration reference: https://docs.puter.com/AI/txt2vid/ . Live paid generation and physical-device downloading require signed-in/device verification.

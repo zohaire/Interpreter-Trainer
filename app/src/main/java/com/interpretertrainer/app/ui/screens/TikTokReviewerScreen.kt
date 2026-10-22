@@ -1,6 +1,10 @@
 package com.interpretertrainer.app.ui.screens
 
 import android.annotation.SuppressLint
+import android.app.DownloadManager
+import android.content.Context
+import android.os.Environment
+import android.widget.Toast
 import android.net.Uri
 import org.json.JSONObject
 import org.json.JSONArray
@@ -45,7 +49,26 @@ fun TikTokReviewerScreen() {
                         if (uri.scheme != "https" || uri.host != "interpreter-trainer.app" || uri.path != "/profile-data") return null
                         return profileDataResponse(uri.getQueryParameter("username").orEmpty())
                     }
-                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = true
+                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                        val uri = request?.url ?: return true
+                        if (uri.scheme == "reviewer-download" && uri.host == "video" && request.isForMainFrame && request.hasGesture()) {
+                            val target = Uri.parse(uri.getQueryParameter("url").orEmpty())
+                            if (target.scheme == "https" && !target.host.isNullOrBlank() && target.userInfo == null) {
+                                try {
+                                    val download = DownloadManager.Request(target)
+                                        .setTitle("TikTok Reviewer generated video")
+                                        .setMimeType("video/mp4")
+                                        .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                        .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "TikTokReviewer-${System.currentTimeMillis()}.mp4")
+                                    (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(download)
+                                    Toast.makeText(context, "Video download started. Check Downloads.", Toast.LENGTH_LONG).show()
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "Could not start download. Your clip is saved in Puter.", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                        return true
+                    }
                 }
                 webChromeClient = object : CoachChromeClient(context) {
                     override fun onShowFileChooser(view: WebView?, callback: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {

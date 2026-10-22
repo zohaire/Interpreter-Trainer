@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "InterpreterTrainer"
+rootProject.name = "TikTokReviewer"
 include(":app")

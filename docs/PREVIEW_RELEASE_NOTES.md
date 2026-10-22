@@ -1,11 +1,15 @@
-# Interpreter Trainer — inline AI practice update
+# TikTok Reviewer preview
 
-This preview adds compact AI text generation directly inside Simultaneous, Shadowing, Consecutive and Live Transcription. Tapping **Generate** opens a temporary sheet for the topic and length, then inserts a clean passage into the current exercise without navigating to the AI workspace or reserving extra screen space.
+A creator workspace for quick, encouraging content feedback. Includes a new black/cyan/pink video icon, optional three-question setup, soft blush interface, expandable review cards, personalized ideas and seven-day plans, and saved favorites.
 
-Inline passage generation now uses the low-latency GPT-5 Nano route with reasoning disabled, while the full Interpreter AI coach remains on Qwen3.6 27B. This avoids starting a large coaching model for a short, tightly constrained exercise passage and prevents duplicate rapid requests.
+Upload a local video or enter a script. Optional comments and analytics help ground the suggestions. Original videos stay on-device; up to eight stills and supplied text are shared with Puter only when you request an AI review with consent. Audio is not analyzed. The Profiles tab can retrieve a public username's bio, account counts and up to ten recent post captions/view counts from TikTok's public embed, then request an AI review with consent. Availability depends on TikTok; missing or blocked data produces an error. Private analytics and numerical reach forecasting are not available.
 
-Interpreter AI now uses a polished single-chat workspace; the separate evaluation interface and request path have been removed. Streamed replies, practice transfer, voice controls and the fixed Modern Standard Arabic policy remain available. The assistant's authoritative context also includes Zouhair Elachaqi's verified developer and academic profile.
+Puter sign-in and usage allowances apply. Test the APK on your Android device before relying on its feedback. This app is independent of TikTok and Grow Now.
 
-The application ID, saved practice data and stable preview signing key are retained so this APK can update recent previews. The live provider catalog is checked for both `qwen/qwen3.6-27b` and `gpt-5-nano`; Puter authentication and account quota still apply. Automated browser checks simulate the SDK and therefore do not establish live account availability.
+## Review chat and video creation
 
-Android 12 or newer is required. Download the APK for direct installation; an AAB is not an installable APK.
+Ask follow-up questions beneath any review. Conversations stay with their review in local history and can be cleared. The AI sees that feedback and the conversation, not the original video.
+
+The Videos tab requests a 15-second Seedance 2.0 clip through the existing Puter sign-in. Choose vertical or landscape, 1080p or 720p, and generated sound. Prompt sharing and AI credit use require consent. Clips are saved to Puter storage; preview them and use Save to phone for Android Downloads. Generation is not unlimited free. The provider can shorten clips for insufficient balance; actual duration and dimensions are checked from returned metadata and discrepancies are displayed. Keep the app open during generation. No automatic retries or model fallback that could spend additional credits.
+
+Integration reference: https://docs.puter.com/AI/txt2vid/ . Live paid generation and physical-device downloading require signed-in/device verification.

@@ -1060,7 +1060,7 @@ internal fun configureCoachWebView(webView: WebView) {
     }
 }
 
-internal class CoachChromeClient(private val context: Context) : WebChromeClient() {
+internal open class CoachChromeClient(private val context: Context) : WebChromeClient() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreateWindow(
         view: WebView?,

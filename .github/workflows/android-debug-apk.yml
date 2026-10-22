@@ -112,7 +112,7 @@ jobs:
       - name: Upload tested preview packages and reports
         uses: actions/upload-artifact@v4
         with:
-          name: interpreter-trainer-preview-${{ github.sha }}
+          name: tiktok-reviewer-preview-${{ github.sha }}
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/release/app-release.apk
@@ -135,7 +135,7 @@ jobs:
       - name: Download tested packages
         uses: actions/download-artifact@v4
         with:
-          name: interpreter-trainer-preview-${{ github.sha }}
+          name: tiktok-reviewer-preview-${{ github.sha }}
           path: dist
 
       - name: Publish tagged public preview
@@ -148,16 +148,16 @@ jobs:
           APK="$(find dist -path '*/apk/release/app-release.apk' -type f -print -quit)"
           AAB="$(find dist -path '*/bundle/release/app-release.aab' -type f -print -quit)"
           test -n "$APK" && test -n "$AAB"
-          cp "$APK" Interpreter-Trainer-${TAG}.apk
-          cp "$AAB" Interpreter-Trainer-${TAG}.aab
+          cp "$APK" TikTok-Reviewer-${TAG}.apk
+          cp "$AAB" TikTok-Reviewer-${TAG}.aab
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" "$GITHUB_SHA" -m "Interpreter Trainer $TAG"
+          git tag -a "$TAG" "$GITHUB_SHA" -m "TikTok Reviewer $TAG"
           git push origin "$TAG"
           gh release create "$TAG" \
             --verify-tag \
             --prerelease \
-            --title "Interpreter Trainer ${TAG}" \
+            --title "TikTok Reviewer ${TAG}" \
             --notes-file docs/PREVIEW_RELEASE_NOTES.md \
-            "Interpreter-Trainer-${TAG}.apk#Android APK (public preview signing key)" \
-            "Interpreter-Trainer-${TAG}.aab#Android App Bundle (public preview signing key)"
+            "TikTok-Reviewer-${TAG}.apk#Android APK (public preview signing key)" \
+            "TikTok-Reviewer-${TAG}.aab#Android App Bundle (public preview signing key)"

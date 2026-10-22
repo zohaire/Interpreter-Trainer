@@ -1,73 +1,39 @@
-# Interpreter Trainer
+# TikTok Reviewer
 
-Interpreter Trainer is a production-oriented Android 12+ practice studio for Arabic, English and French interpreters. It combines guided practice, recording, transcription, review and an optional online AI coach in one Compose application.
+Android creator workspace with a soft blush interface, coral-to-orange actions, brief expandable feedback cards, and a cyan/pink short-video launcher icon. Repurposed from Interpreter Trainer. The launcher opens the new review experience; the previous training implementation remains in source for migration reference but is not part of the active navigation.
 
-## What is included
+## Creator workflow
 
-- Simultaneous interpretation from local media, direct streams, supported video sites or source text
-- Shadowing in Arabic, English and French with recording, live transcript and replay
-- Consecutive interpretation with 15, 30 or 60-second source segments
-- Three-language live transcription through Android speech recognition
-- Local practice history with transcripts, recordings, notes and feedback
-- Dedicated Practice Library with 20 official UN General Assembly sources, four-minute training windows, provenance metadata, search, filters, favorites, recents and progress
-- Personal practice library for persisted on-device audio/video imports and secure media links, with direct handoff to the existing training modes
-- Professional dashboard with real weekly progress, one-tap resume and persistent Home, Practice, AI Coach and History navigation
-- Redesigned Interpreter AI workspace using Qwen3.6 27B through Puter
-- Streamed chat with conversation context, voice controls and direct practice transfer
-- Compact in-exercise AI passage generation for all four practice modes
-- Earlier Interpreter Live voice controls with Android speech recognition and TTS fallback
-- Modern Standard Arabic policy for Arabic responses
-- System, light and dark themes with a responsive Material 3 interface
-- Bluetooth, wired and external audio-route awareness
+1. Optionally answer three short creator-profile questions, or skip setup.
+2. Select a local video (up to 200 MB and 180 seconds), or enter a script.
+3. Optionally set your niche, target audience/language, and review focus.
+4. Optionally paste real viewer comments and post analytics.
+5. Connect the existing Puter AI account, consent to sharing the supplied evidence, and request a review.
+6. Read one observed strength and one suggested improvement. Open category cards for detail, try a rewritten hook, or copy the feedback.
+7. Generate one complete post idea or a seven-day plan from your topic and optional profile. Bookmark favorites in the Saved shelf; history keeps your latest 20 results.
 
-AI is optional and online-only: the app does not download a 400–500 MB neural model. Before the coach is opened for the first time, the app explains which data may leave the device and requires an explicit choice. See [PRIVACY.md](PRIVACY.md).
+## AI integration and evidence
 
-## Build and test
+Retains the existing Puter SDK and authentication window. Text-only reviews use the existing `qwen/qwen3.6-27b` model; sampled-image reviews use `gpt-4.1-mini`, already used elsewhere in the project, for vision input. Availability and charges depend on the user's provider account.
 
-Requirements: JDK 21 and Android SDK 37.
+Video frames are sampled locally (up to eight JPEG stills). Only these stills and the supplied text are submitted after consent. Original video files and audio are not uploaded. This is sparse visual analysis, not continuous video or automatic audio transcription. Supply a transcript for speech feedback. The Profiles tab retrieves available public account counts and recent captions/view counts. Comments, private analytics and trends are not fetched. The AI uses supplied feedback as context, without retraining the underlying model. No growth guarantees or fabricated performance scores.
 
-```bash
-./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
-```
+## Validation
 
-Optimized release packages use R8 and resource shrinking. Provide a private release key through environment variables:
+- `node --test .github/tests/tiktok-reviewer.cjs` (requires Playwright + Chromium; CI installs both)
+- `node --check app/src/main/assets/tiktok_reviewer.js`
+- `./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug`
 
-```bash
-INTERPRETER_RELEASE_KEYSTORE=/absolute/path/release.jks \
-INTERPRETER_RELEASE_STORE_PASSWORD='...' \
-INTERPRETER_RELEASE_KEY_ALIAS='...' \
-INTERPRETER_RELEASE_KEY_PASSWORD='...' \
-./gradlew --no-daemon :app:assembleRelease :app:bundleRelease
-```
+Android device testing must cover video selection/decoding, Puter popup sign-in, a real text review and a real image review. Local mocked tests do not verify provider availability. Existing training tests cover retained legacy source only. The creator browser tests cover skippable setup, consent and optional context, text/vision routing, hidden-video isolation, provider failures, ideas/plans, bookmarks/deletion, safe rendering and mobile overflow. The AI is mocked in browser tests.
 
-Package ID: `com.interpretertrainer.app`
+Public Grow Now store screenshots informed the blush palette, card hierarchy and expandable feedback pattern: https://play.google.com/store/apps/details?id=com.escape.grownow . Onboarding questions and visual assets are original. Profiles supports public-embed lookup by username without an API key. It returns available account counts, captions and views, not private analytics or predictive metrics.
 
-Minimum SDK: 31
+Application ID is unchanged to preserve installation identity. Existing practice records are not sent to the reviewer. See PRIVACY.md for the new review data flow.
 
-Target SDK: 36; compile SDK: 37
+## Review chat and video creation
 
-## Release channels
+Ask follow-up questions beneath any review. Conversations stay with their review in local history and can be cleared. The AI sees that feedback and the conversation, not the original video.
 
-Every pull request and push to `main` checks that the selected model remains in the live provider catalog, tests the coach and in-exercise generator with their Android integration, then runs Kotlin unit tests, Android lint, debug/release builds and signature verification. Browser tests cover two-turn streaming, inline passage generation, provider error visibility and recovery, practice transfer, voice controls and Arabic labels using a simulated SDK. They do not prove live access through a user's Puter account. After all gates pass on `main`, the workflow publishes an installable preview APK and an AAB.
+The Videos tab requests a 15-second Seedance 2.0 clip through the existing Puter sign-in. Choose vertical or landscape, 1080p or 720p, and generated sound. Prompt sharing and AI credit use require consent. Clips are saved to Puter storage; preview them and use Save to phone for Android Downloads. Generation is not unlimited free. The provider can shorten clips for insufficient balance; actual duration and dimensions are checked from returned metadata and discrepancies are displayed. Keep the app open during generation. No automatic retries or model fallback that could spend additional credits.
 
-The current preview retains the stable package identity and signing key so recent previews can be updated in place. Puter authentication and quota apply to the Qwen3.6 model. See [the preview release notes](docs/PREVIEW_RELEASE_NOTES.md).
-
-GitHub preview packages use the repository's public, stable preview key so testers can install updates. That key is intentionally not a Play production key and must never be used for a store production release. The Play handoff is documented in [docs/PLAY_STORE_RELEASE.md](docs/PLAY_STORE_RELEASE.md).
-
-## Data and security
-
-- Practice records and recordings use app-private storage; Android backup is disabled.
-- Deleting a session removes its owned recording, and stale orphan recordings are pruned safely.
-- The privileged coach WebView restricts top-level navigation and exposes only its narrow native bridge.
-- No AI provider secret is embedded in the APK; users authenticate with Puter.
-- AI-generated coaching and practice material are advisory and should be checked for accuracy.
-
-Please report security issues using [SECURITY.md](SECURITY.md). Contribution standards are in [CONTRIBUTING.md](CONTRIBUTING.md), and third-party notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## Ownership and support
-
-Created and developed by **Zouhair Elachaqi**.
-
-Academic background: Licence de l’Éducation – English Studies, Faculty of Education Sciences, Université Mohammed V, Rabat (2023–2026).
-
-Support: **zohaireachak@gmail.com**
+Integration reference: https://docs.puter.com/AI/txt2vid/ . Live paid generation and physical-device downloading require signed-in/device verification.
